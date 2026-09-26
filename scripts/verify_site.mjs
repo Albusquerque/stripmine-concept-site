@@ -18,6 +18,14 @@ try {
   assert.match(await page.title(), /StripMine/);
   assert.equal((await page.locator(".brand-wordmark").innerText()).replace(/\s/g, ""), "StripMine");
   assert.match(await page.locator(".brand-logo").getAttribute("src"), /stripmine-logo\.png$/);
+  const brandMetrics = await page.locator(".brand").evaluate((brand) => {
+    const wordmark = brand.querySelector(".brand-wordmark");
+    const bounds = wordmark?.getBoundingClientRect();
+    return { width: bounds?.width ?? 0, height: bounds?.height ?? 0, fontSize: parseFloat(getComputedStyle(wordmark).fontSize) };
+  });
+  assert.ok(brandMetrics.width >= 175, `Header wordmark is too narrow: ${brandMetrics.width}px`);
+  assert.ok(brandMetrics.height >= 54, `Header wordmark is too short: ${brandMetrics.height}px`);
+  assert.ok(brandMetrics.fontSize >= 54, `Header wordmark is too small: ${brandMetrics.fontSize}px`);
   await page.frameLocator("#game-frame").locator("body").waitFor();
 
   await page.locator('[data-view="decky"]').click();
