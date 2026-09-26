@@ -1774,12 +1774,12 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
         ctx.fillStyle = "#5d3b26";
         ctx.fillRect(-3, -4, 6, 94);
         ctx.fillStyle = "#c9d9d7";
-        ctx.fillRect(-28, -9, 56, 7);
+        ctx.fillRect(-17, -9, 47, 7);
         ctx.fillStyle = "#f4ffff";
-        ctx.fillRect(-24, -8, 18, 2);
+        ctx.fillRect(-13, -8, 16, 2);
         ctx.fillStyle = "#819698";
-        ctx.fillRect(-31, -6, 7, 10);
-        ctx.fillRect(25, -6, 7, 10);
+        ctx.fillRect(-20, -6, 6, 10);
+        ctx.fillRect(27, -6, 7, 10);
         ctx.restore();
         if (striking && impact > 0) {
             ctx.globalAlpha = impact * .62;
