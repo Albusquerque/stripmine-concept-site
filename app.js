@@ -6,8 +6,12 @@ const tvBezel = document.querySelector(".tv-bezel");
 const tvScreen = document.querySelector(".tv-screen-scale");
 const gameFrame = document.querySelector("#game-frame");
 const deckyFrame = document.querySelector("#decky-frame");
+const deckyView = document.querySelector(".decky-view");
 const TV_VIEWPORT = { width: 1920, height: 1080 };
 const LIGHT_PROFILE_MESSAGE = "stripmine:light-profile";
+const DECKY_PANEL_SIZE_MESSAGE = "stripmine:decky-panel-size";
+const PREVIEW_SCREEN_MESSAGE = "stripmine:preview-screen-active";
+let deckyPanelObserver = null;
 
 function fitTelevision() {
   const scale = Math.min(tvBezel.clientWidth / TV_VIEWPORT.width, tvBezel.clientHeight / TV_VIEWPORT.height);
@@ -100,12 +104,68 @@ function applyLightProfile(style, { broadcast = true, source = null, animate = t
 }
 
 window.addEventListener("message", (event) => {
-  if (event.origin !== window.location.origin || event.data?.type !== LIGHT_PROFILE_MESSAGE) return;
-  applyLightProfile(event.data.style, { source: event.source });
+  if (event.origin !== window.location.origin) return;
+  if (event.data?.type === DECKY_PANEL_SIZE_MESSAGE && event.source === deckyFrame.contentWindow) {
+    applyDeckyPanelHeight(Number(event.data.height));
+    return;
+  }
+  if (event.data?.type === LIGHT_PROFILE_MESSAGE) {
+    applyLightProfile(event.data.style, { source: event.source });
+  }
 });
 
-gameFrame.addEventListener("load", () => broadcastLightProfile());
-deckyFrame.addEventListener("load", () => broadcastLightProfile());
+function syncGamePreviewAudio() {
+  gameFrame.contentWindow?.postMessage({
+    type: PREVIEW_SCREEN_MESSAGE,
+    active: state.view === "game",
+  }, window.location.origin);
+}
+
+gameFrame.addEventListener("load", () => {
+  broadcastLightProfile();
+  syncGamePreviewAudio();
+});
+function fitDeckyPanel() {
+  let contentHeight = 0;
+  try {
+    const panel = deckyFrame.contentDocument?.querySelector(".sm-qam");
+    contentHeight = Math.ceil(Math.max(
+      panel?.scrollHeight || 0,
+      panel?.getBoundingClientRect().height || 0,
+    ));
+  } catch (_error) {
+    return;
+  }
+  applyDeckyPanelHeight(contentHeight);
+}
+
+function applyDeckyPanelHeight(contentHeight) {
+  if (!Number.isFinite(contentHeight) || contentHeight <= 0) return;
+  const minimum = window.matchMedia("(max-width:650px)").matches ? 760 : 860;
+  // 47 px is the mock Steam/Decky header. The extra breathing room keeps the
+  // final action row clear of the frame edge instead of cropping it.
+  deckyView.style.height = `${Math.max(minimum, contentHeight + 59)}px`;
+}
+
+function observeDeckyPanel(attempt = 0) {
+  deckyPanelObserver?.disconnect();
+  const panel = deckyFrame.contentDocument?.querySelector(".sm-qam");
+  if (!panel) {
+    // The iframe load event precedes React's asynchronous first commit.
+    // Keep looking briefly instead of measuring an empty document once.
+    if (attempt < 120) requestAnimationFrame(() => observeDeckyPanel(attempt + 1));
+    return;
+  }
+  deckyPanelObserver = new ResizeObserver(fitDeckyPanel);
+  deckyPanelObserver.observe(panel);
+  fitDeckyPanel();
+}
+
+deckyFrame.addEventListener("load", () => {
+  broadcastLightProfile();
+  observeDeckyPanel();
+});
+window.addEventListener("resize", fitDeckyPanel);
 window.addEventListener("load", () => broadcastLightProfile());
 
 function setView(view) {
@@ -118,6 +178,7 @@ function setView(view) {
   document.querySelector("#signal-title").textContent = copy.title;
   document.querySelector("#signal-description").textContent = copy.description;
   opticalLab.hidden = view !== "physical";
+  syncGamePreviewAudio();
   if (view === "decky") {
     if (!deckyFrame.hasAttribute("src")) deckyFrame.src = deckyFrame.dataset.src;
     else broadcastLightProfile();

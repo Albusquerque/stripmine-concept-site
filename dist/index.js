@@ -52,6 +52,7 @@ class StripMineAudio {
     lastReward = -1;
     workerImpacts = new Map();
     defaultUnlock = null;
+    screenActive = false;
     musicEnabled = this.readEnabled("stripmine.musicEnabled", true);
     effectsEnabled = this.readEnabled("stripmine.effectsEnabled", true);
     musicVolume = this.readVolume("stripmine.musicVolume", 0.8);
@@ -84,6 +85,8 @@ class StripMineAudio {
         }
     }
     ensure() {
+        if (!this.screenActive)
+            return null;
         if (this.context) {
             if (this.context.state === "suspended")
                 void this.context.resume().catch(() => undefined);
@@ -463,6 +466,8 @@ class StripMineAudio {
         this.defaultUnlock = null;
     }
     startDefaults() {
+        if (!this.screenActive)
+            return;
         const unlock = () => {
             if (this.musicEnabled)
                 this.setMusic(true);
@@ -483,7 +488,7 @@ class StripMineAudio {
         this.writeEnabled("stripmine.musicEnabled", enabled);
         window.clearInterval(this.timer);
         this.timer = 0;
-        if (!enabled)
+        if (!enabled || !this.screenActive)
             return true;
         const context = this.ensure();
         if (!context)
@@ -497,8 +502,42 @@ class StripMineAudio {
     setEffects(enabled) {
         this.effectsEnabled = enabled;
         this.writeEnabled("stripmine.effectsEnabled", enabled);
-        if (enabled)
+        if (enabled && this.screenActive)
             this.ensure();
+    }
+    setScreenActive(active) {
+        if (this.screenActive === active)
+            return;
+        this.screenActive = active;
+        if (active) {
+            this.startDefaults();
+            return;
+        }
+        // Closing rather than merely suspending discards notes already scheduled
+        // by the look-ahead sequencer. They must not leak into Steam or replay as
+        // a stale burst when the player comes back later.
+        this.stopOutput();
+    }
+    stopOutput() {
+        this.clearDefaultUnlock();
+        window.clearInterval(this.timer);
+        this.timer = 0;
+        const context = this.context;
+        if (context && this.master) {
+            // Silence synchronously. AudioContext.close() is asynchronous and some
+            // WebKit/Chromium builds can otherwise emit a short tail while a new
+            // full-screen instance is already starting.
+            this.master.gain.cancelScheduledValues(context.currentTime);
+            this.master.gain.setValueAtTime(0, context.currentTime);
+        }
+        this.context = null;
+        this.master = null;
+        this.music = null;
+        this.sfx = null;
+        this.reverb = null;
+        this.delay = null;
+        this.noise = null;
+        void context?.close().catch(() => undefined);
     }
     setMusicVolume(value) {
         this.musicVolume = Math.max(0, Math.min(1, value));
@@ -519,6 +558,8 @@ class StripMineAudio {
         catch { /* Decky storage may be unavailable during bootstrap. */ }
     }
     play(kind) {
+        if (!this.screenActive)
+            return;
         const finaleMusic = kind === "finale" && this.musicEnabled;
         if (!this.effectsEnabled && !finaleMusic)
             return;
@@ -641,20 +682,18 @@ class StripMineAudio {
         this.lastReward = status.reward_seq;
     }
     dispose() {
-        this.clearDefaultUnlock();
-        window.clearInterval(this.timer);
-        this.timer = 0;
-        void this.context?.close().catch(() => undefined);
-        this.context = null;
+        this.screenActive = false;
+        this.stopOutput();
     }
 }
 
 const PAGES = ["SETTLEMENT", "CREW", "TWIN CITY", "DEPOSIT", "PROGRESSION"];
 const RANKS$1 = ["#ffd13f", "#35e57d", "#ff8423", "#fa4697", "#f4f7ff"];
-const MATRIX_COLS = 360;
-const MATRIX_ROWS = 270;
+const MATRIX_COLS = 512;
+const MATRIX_ROWS = 384;
 const DESIGN_WIDTH = 256;
-const OUTPUT_SCALE = 3;
+const OUTPUT_SCALE = 2;
+const MATRIX_DOTS = MATRIX_COLS * MATRIX_ROWS;
 const MATRIX_PAGE_MS = 6000;
 function DotMatrix({ status }) {
     const canvasRef = SP_REACT.useRef(null);
@@ -796,9 +835,9 @@ function DotMatrix({ status }) {
                     const on = pixels[offset + 3] > 24;
                     const pulse = .94 + Math.sin(now * .0016 + col * .07) * .06;
                     ctx.fillStyle = on ? `rgba(${Math.min(255, pixels[offset] * 1.28 + 18)},${Math.min(255, pixels[offset + 1] * 1.28 + 18)},${Math.min(255, pixels[offset + 2] * 1.28 + 18)},${.98 * pulse})` : "rgba(118,76,38,.13)";
-                    const size = on ? 2.58 : .69;
+                    const size = on ? 1.58 : .44;
                     ctx.beginPath();
-                    ctx.arc(col * OUTPUT_SCALE + 1.5, row * OUTPUT_SCALE + 1.5, size / 2, 0, Math.PI * 2);
+                    ctx.arc(col * OUTPUT_SCALE + 1, row * OUTPUT_SCALE + 1, size / 2, 0, Math.PI * 2);
                     ctx.fill();
                 }
             canvas.setAttribute("aria-label", `${page < 0 ? s.cue_label : PAGES[page]}. ${s.message}`);
@@ -810,10 +849,9 @@ function DotMatrix({ status }) {
     return SP_JSX.jsx("canvas", { ref: canvasRef, className: "sm-matrix", width: MATRIX_COLS * OUTPUT_SCALE, height: MATRIX_ROWS * OUTPUT_SCALE });
 }
 
-const isDeckyAssetServer = window.location.protocol === "http:" && window.location.port === "1337";
-const STRIPMINE_LOGO_URL = isDeckyAssetServer
-    ? "http://127.0.0.1:1337/plugins/StripMine/assets/stripmine-logo.png"
-    : new URL("../assets/stripmine-logo.png", window.location.href).href;
+var stripMineLogoUrl = 'http://127.0.0.1:1337/plugins/StripMine/assets/stripmine-logo-216cf589.png';
+
+const STRIPMINE_LOGO_URL = window.__STRIPMINE_PREVIEW_LOGO__ ?? stripMineLogoUrl;
 
 function Button$1(props) { return SP_JSX.jsx(DFL.Button, { ...props }); }
 const TEMPOS$1 = [
@@ -1524,7 +1562,6 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
     const phase = time * .011 + worker.id * 1.37;
     const gait = striking ? 0 : Math.sin(phase);
     const bob = striking ? 0 : Math.abs(gait) * 4;
-    const armSwing = gait * 12;
     const legSwing = gait * 10;
     const part = (ox, oy, angle, width, height, fill, accent) => { ctx.save(); ctx.translate(ox, oy); ctx.rotate(angle); ctx.fillStyle = "#091012"; ctx.fillRect(-width / 2 - 2, -2, width + 4, height + 4); ctx.fillStyle = fill; ctx.fillRect(-width / 2, 0, width, height); if (accent) {
         ctx.fillStyle = accent;
@@ -1534,7 +1571,8 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
     const swing = strikeProgress ?? 0;
     const ease = (value) => value * value * (3 - 2 * value);
     const lerp = (from, to, amount) => from + (to - from) * amount;
-    let toolAngle = -0.9;
+    const walkingToolAngle = -0.52 + gait * .14;
+    let toolAngle = striking ? -0.9 : walkingToolAngle;
     let impact = 0;
     if (striking) {
         if (swing < .48)
@@ -1549,8 +1587,9 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
             toolAngle = lerp(.62, -0.9, ease((swing - .78) / .22));
     }
     const toolDirection = { x: Math.cos(toolAngle), y: Math.sin(toolAngle) };
-    const rearGrip = { x: 23, y: -63 };
+    const rearGrip = { x: striking ? 23 : 22 + gait * 2, y: striking ? -63 : -62 + Math.abs(gait) };
     const frontGrip = { x: rearGrip.x + toolDirection.x * 19, y: rearGrip.y + toolDirection.y * 19 };
+    const limbEnd = (origin, angle, length) => ({ x: origin.x - Math.sin(angle) * length, y: origin.y + Math.cos(angle) * length });
     const elbow = (shoulder, hand, bend) => {
         const dx = hand.x - shoulder.x;
         const dy = hand.y - shoulder.y;
@@ -1582,6 +1621,16 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
         ctx.fillRect(hand.x - 5, hand.y - 5, 10, 10);
         ctx.restore();
     };
+    const boot = (ankle, angle, fill, accent) => {
+        ctx.save();
+        ctx.translate(ankle.x, ankle.y);
+        ctx.rotate(angle);
+        poly("#080e10", [[-9, -5], [7, -5], [17, 0], [17, 8], [-11, 8], [-11, -1]]);
+        poly(fill, [[-7, -3], [6, -3], [14, 1], [14, 5], [-8, 5], [-8, 0]]);
+        ctx.fillStyle = accent;
+        ctx.fillRect(-5, -2, 12, 2);
+        ctx.restore();
+    };
     ctx.save();
     ctx.translate(x, ground - bob);
     ctx.scale(facing, 1);
@@ -1592,21 +1641,15 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
     ctx.fill();
     ctx.globalAlpha = 1;
     const rearLeg = legSwing * Math.PI / 180;
-    part(-8, -43, rearLeg, 11, 36, "#283840", "#49606a");
-    part(10, -43, -rearLeg, 11, 36, "#324650", "#5d7580");
-    ctx.fillStyle = "#11191c";
-    ctx.fillRect(-22 + legSwing * .2, -9, 24, 9);
-    ctx.fillRect(4 - legSwing * .2, -9, 25, 9);
-    ctx.fillStyle = "#59656a";
-    ctx.fillRect(-19 + legSwing * .2, -8, 15, 3);
-    ctx.fillRect(7 - legSwing * .2, -8, 15, 3);
-    if (striking)
-        articulatedArm({ x: -18, y: -83 }, rearGrip, -0.68, shadeHex(coat, -20));
-    else {
-        part(-21, -84, -armSwing * Math.PI / 180, 10, 35, shadeHex(coat, -20), colour);
-        ctx.fillStyle = skin;
-        ctx.fillRect(-29 + armSwing * .16, -55, 9, 9);
-    }
+    const rearHip = { x: -8, y: -43 };
+    const frontHip = { x: 10, y: -43 };
+    part(rearHip.x, rearHip.y, rearLeg, 11, 36, "#283840", "#49606a");
+    part(frontHip.x, frontHip.y, -rearLeg, 11, 36, "#324650", "#5d7580");
+    const rearAnkle = limbEnd(rearHip, rearLeg, 36);
+    const frontAnkle = limbEnd(frontHip, -rearLeg, 36);
+    boot(rearAnkle, -rearLeg * .16, "#11191c", "#59656a");
+    boot(frontAnkle, rearLeg * .16, "#11191c", "#667277");
+    articulatedArm({ x: -18, y: -83 }, rearGrip, -0.68, shadeHex(coat, -20));
     ctx.fillStyle = "#081012";
     ctx.fillRect(-23, -91, 48, 53);
     ctx.fillStyle = coat;
@@ -1627,13 +1670,7 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
     ctx.fillRect(-28, -82, 7, 25);
     ctx.fillStyle = "#d9c187";
     ctx.fillRect(-26, -78, 3, 8);
-    if (striking)
-        articulatedArm({ x: 19, y: -83 }, frontGrip, .72, shadeHex(coat, 8));
-    else {
-        part(21, -84, armSwing * Math.PI / 180, 10, 35, shadeHex(coat, 8), colour);
-        ctx.fillStyle = skinLight;
-        ctx.fillRect(24 - armSwing * .12, -56, 9, 9);
-    }
+    articulatedArm({ x: 19, y: -83 }, frontGrip, .72, shadeHex(coat, 8));
     ctx.fillStyle = "#071012";
     ctx.fillRect(-15, -122, 36, 36);
     ctx.fillStyle = hair;
@@ -1729,7 +1766,7 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
         ctx.lineWidth = 2;
         ctx.strokeRect(-24, -145, 57, 25);
     }
-    if (striking) {
+    {
         const handleRoot = { x: rearGrip.x - toolDirection.x * 17, y: rearGrip.y - toolDirection.y * 17 };
         const head = { x: rearGrip.x + toolDirection.x * 73, y: rearGrip.y + toolDirection.y * 73 };
         const normal = { x: -toolDirection.y, y: toolDirection.x };
@@ -1766,7 +1803,7 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
         ctx.lineTo(head.x - normal.x * 4, head.y - normal.y * 4);
         ctx.stroke();
         ctx.restore();
-        if (impact > 0) {
+        if (striking && impact > 0) {
             ctx.globalAlpha = impact * .62;
             ctx.fillStyle = rgb(cargoLight);
             for (let chip = 0; chip < 5; chip += 1) {
@@ -1775,22 +1812,6 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
             }
             ctx.globalAlpha = 1;
         }
-    }
-    else {
-        const walkingToolAngle = -0.52 + gait * .14;
-        ctx.save();
-        ctx.translate(27, -65);
-        ctx.rotate(walkingToolAngle);
-        ctx.fillStyle = "#5d3b26";
-        ctx.fillRect(-3, -4, 6, 63);
-        ctx.fillStyle = "#c9d9d7";
-        ctx.fillRect(-28, -9, 56, 7);
-        ctx.fillStyle = "#f4ffff";
-        ctx.fillRect(-24, -8, 18, 2);
-        ctx.fillStyle = "#819698";
-        ctx.fillRect(-31, -6, 7, 10);
-        ctx.fillRect(25, -6, 7, 10);
-        ctx.restore();
     }
     const dust = striking ? impact : Math.abs(gait);
     ctx.globalAlpha = dust * .3;
@@ -2298,6 +2319,12 @@ const styles = `
 /* Large-screen command hierarchy: these are gameplay controls, not tiny HUD metadata. */
 .sm-control-group{display:flex;flex-direction:column;gap:4px}.sm-control-group>span{padding-left:5px;color:#9ab2b5;font:900 7px ui-monospace,monospace;letter-spacing:.17em;text-shadow:0 2px 4px #000}.sm-world-bar-mode button.luminous{border-left:2px solid #2e9cff!important}.sm-world-bar-mode button.contrasted{border-left:2px solid #ff7842!important}.sm-world-bar-mode button.luminous.active{background:linear-gradient(135deg,#16465d,#173b3a)!important;color:#f0fffd!important;box-shadow:inset 0 0 16px #46e8d33a,0 0 13px #2e9cff2e!important}.sm-world-bar-mode button.contrasted.active{background:linear-gradient(135deg,#42291d,#17181b)!important;color:#ffe7c9!important;box-shadow:inset 0 0 16px #ff784226,0 0 13px #ff784229!important}.sm-world-bar-mode button.luminous.active small{color:#a9f1e7}.sm-world-bar-mode button.contrasted.active small{color:#ffb28e}
 @media(min-width:1500px){.sm-top-controls{top:20px;gap:14px}.sm-control-group{gap:5px}.sm-control-group>span{font-size:11px}.sm-tempo,.sm-world-bar-mode{padding:5px;border-width:2px;border-radius:8px;box-shadow:0 10px 26px #0009}.sm-tempo button,.sm-world-bar-mode button{min-height:58px!important;padding:8px 12px!important;font-size:14px!important}.sm-tempo button{min-width:112px!important}.sm-world-bar-mode button{min-width:160px!important}.sm-tempo button small,.sm-world-bar-mode button small{margin-top:4px;font-size:9px}.sm-action-audio>span{font-size:10px}.sm-action-audio button{min-height:36px!important;padding:8px 11px!important;font-size:12px!important}.sm-action{padding:10px 16px!important;gap:15px!important}.sm-action kbd{flex-basis:52px;width:52px;height:52px;font-size:23px}.sm-action b{font-size:17px}.sm-action small{margin-top:5px;font-size:12px}.sm-actions{grid-template-rows:auto minmax(0,1fr) minmax(0,1fr)}}
+/* Steam's route is shorter than the outer 16:9 viewport because its chrome remains
+   mounted. Size the game from that real route box: viewport units otherwise add
+   the Steam bars a second time and force vertical scrolling. */
+.sm-app{position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%;min-width:0;min-height:0;overflow:hidden}
+.sm-shell{width:100%;height:100%;min-width:0;min-height:0;grid-template-rows:minmax(0,78fr) minmax(0,22fr);overflow:hidden}
+.sm-world-stage,.sm-command,.sm-status-panel,.sm-strip-panel,.sm-actions{min-height:0;overflow:hidden}
 `;
 
 function Button({ className = "", onGamepadFocus, onGamepadBlur, ...props }) {
@@ -2367,7 +2394,10 @@ function Game() {
     const audio = sharedAudio;
     const introInitialized = SP_REACT.useRef(false);
     const strikePending = SP_REACT.useRef(false);
-    SP_REACT.useEffect(() => { audio.startDefaults(); }, [audio]);
+    SP_REACT.useEffect(() => {
+        audio.setScreenActive(true);
+        return () => audio.setScreenActive(false);
+    }, [audio]);
     const acceptStatus = SP_REACT.useCallback((next) => {
         setStatus((previous) => {
             if (previous && next.cue_seq > previous.cue_seq) {
@@ -2483,7 +2513,7 @@ function Game() {
     const lead = status.workers[0];
     const movement = lead?.held ? "WAITING AT GATE" : lead?.outbound ? "OUTBOUND" : "RETURNING LOADED";
     const nextReward = status.age === 0 && status.worker_count < 4 ? "NEW MINER" : status.age > 0 && status.deposit < status.worker_count ? `${status.rank_name.toUpperCase()} RANK` : "CITY UPGRADE";
-    const ledState = status.hardware_owner === "other" ? "BAR RELEASED" : status.hardware_available ? status.led_enabled ? `PHYSICAL BAR LIVE · ${status.optical_bar ? "CONTRASTED" : "LUMINOUS"}` : "BAR DISPLAY OFF" : `SCREEN SIMULATION · ${status.optical_bar ? "CONTRASTED" : "LUMINOUS"}`;
+    const ledState = status.hardware_owner === "SignalBar" ? "SIGNALBAR EVENT · BAR YIELDED" : status.hardware_owner === "other" ? "BAR RELEASED" : status.hardware_available ? status.led_enabled ? `PHYSICAL BAR LIVE · ${status.optical_bar ? "CONTRASTED" : "LUMINOUS"}` : "BAR DISPLAY OFF" : `SCREEN SIMULATION · ${status.optical_bar ? "CONTRASTED" : "LUMINOUS"}`;
     const skylineFloors = status.city.reduce((total, plot) => total + (plot?.level ?? 0) * 2, 0);
     const constructionLevel = status.age * 2 + (status.deposit >= 3 ? 2 : 1) + status.upgrades.industry;
     const constructionName = ["FOUNDRY", "GUILD HOUSE", "OBSERVATORY"][status.deposit % 3];
@@ -2491,7 +2521,7 @@ function Game() {
     const finaleActive = finaleArmed || status.complete;
     const strikeResult = status.cue_active ? status.cue_kind === "critical" ? "PERFECT SIGNAL ×3" : status.cue_kind === "strike" ? "SIGNAL LOCKED ×1.5" : status.cue_kind === "miss" ? "DISTANT ECHO +PROGRESS" : "" : "";
     const progressLabel = veinPercent(status);
-    return SP_JSX.jsxs(DFL.Focusable, { className: "sm-app", navEntryPreferPosition: DFL.NavEntryPositionPreferences.PREFERRED_CHILD, style: { "--ore": ore }, children: [SP_JSX.jsx("style", { children: styles }), showIntro ? SP_JSX.jsx(Intro, { onComplete: completeIntro, tempo: status.tempo, onTempo: (value) => void setTempo(value).then(setStatus) }) : null, SP_JSX.jsxs("div", { className: "sm-shell", children: [SP_JSX.jsxs("section", { className: `sm-world-stage${finaleActive ? " sm-final-stage" : ""}`, children: [SP_JSX.jsx(World, { status: status }), SP_JSX.jsx("div", { className: "sm-vignette" }), !finaleActive ? SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs("div", { className: "sm-hud", children: [SP_JSX.jsxs("div", { className: "sm-hud-left", children: [SP_JSX.jsxs("span", { children: ["AGE ", status.age + 1, " \u00B7 ", status.age_name.toUpperCase()] }), SP_JSX.jsx("strong", { children: status.deposit_name.toUpperCase() }), SP_JSX.jsx("small", { children: status.deposit_story })] }), SP_JSX.jsxs("div", { className: "sm-hud-right", children: [SP_JSX.jsx("span", { children: lead ? `${lead.side === "left" ? "W" : "E"}${Math.floor(lead.id / 2) + 1} ${movement} · LED ${Math.round(lead.position) + 1}/17` : "SHIFT COMPLETE" }), SP_JSX.jsxs("strong", { style: { color: ore }, children: [progressLabel, "%"] }), SP_JSX.jsxs("small", { children: [formatDuration(status.remaining_seconds), " REMAINING"] })] })] }), SP_JSX.jsxs("div", { className: "sm-score-hud", children: [SP_JSX.jsx("span", { children: "CITY VALUE" }), SP_JSX.jsx("strong", { children: formatScore(status.city_value) }), SP_JSX.jsxs("small", { children: ["+", formatScore(status.production_per_minute), "/MIN \u00B7 BEST +", formatScore(status.best_delivery)] })] }), SP_JSX.jsxs("div", { className: "sm-top-controls", children: [SP_JSX.jsxs("div", { className: "sm-control-group", children: [SP_JSX.jsx("span", { children: "SHIFT TEMPO" }), SP_JSX.jsx("div", { className: "sm-tempo", "aria-label": "Shift tempo", children: TEMPOS.map((name, index) => SP_JSX.jsxs(Button, { className: status.tempo === index + 1 ? "active" : "", onClick: () => void setTempo(index + 1).then(acceptStatus), children: [SP_JSX.jsx("b", { children: name }), SP_JSX.jsx("small", { children: TEMPO_DETAILS[index] })] }, name)) })] }), SP_JSX.jsxs("div", { className: "sm-control-group", children: [SP_JSX.jsx("span", { children: "LIGHT PROFILE" }), SP_JSX.jsxs("div", { className: "sm-world-bar-mode", "aria-label": "Physical bar style", children: [SP_JSX.jsxs(Button, { "aria-pressed": !status.optical_bar, className: `luminous${!status.optical_bar ? " active" : ""}`, onClick: () => void setSetting("optical_bar", false).then(acceptStatus), children: [SP_JSX.jsx("b", { children: "LUMINOUS" }), SP_JSX.jsx("small", { children: "BRIGHT \u00B7 SOFT GLOW" })] }), SP_JSX.jsxs(Button, { "aria-pressed": status.optical_bar, className: `contrasted${status.optical_bar ? " active" : ""}`, onClick: () => void setSetting("optical_bar", true).then(acceptStatus), children: [SP_JSX.jsx("b", { children: "CONTRASTED" }), SP_JSX.jsx("small", { children: "DARK \u00B7 CLEAR GAPS" })] })] })] })] })] }) : null, SP_JSX.jsxs("div", { className: "sm-world-nav", children: [SP_JSX.jsx(Button, { onClick: () => DFL.Navigation.NavigateBack(), children: "\u2190 BACK TO STEAM" }), SP_JSX.jsx(Button, { onClick: () => setShowIntro(true), children: "REPLAY INTRO" })] }), status.hardware_owner === "other" || error ? SP_JSX.jsx("div", { className: "sm-alert", children: error || status.hardware_error }) : null, toast ? SP_JSX.jsx("div", { className: "sm-toast", children: toast.label }, toast.seq) : null, !finaleActive ? SP_JSX.jsx(ScoreCascade, { status: status }) : null, SP_JSX.jsx(FinaleOverlay, { status: status })] }), SP_JSX.jsxs("section", { className: "sm-command", children: [SP_JSX.jsx("div", { className: "sm-status-panel", children: SP_JSX.jsxs("div", { className: "sm-shift", children: [SP_JSX.jsxs("span", { className: "sm-kicker", children: ["SHIFT CONTROL \u00B7 ", status.tempo_name, " \u00D7", status.tempo] }), SP_JSX.jsx("strong", { children: status.complete ? "THE CITY REMEMBERS EVERY LIGHT" : status.reward_pending ? status.cue_label : status.convoy_held ? `CITY GATES HOLDING · ${status.pending_convoy}/4 LOADED` : status.overcharge_remaining > 0 ? "OVERCHARGE · EVERY DELIVERY ×2.25" : `FOLLOW THE CREW · STRIKE AT ${status.deposit_short}` }), SP_JSX.jsxs("p", { children: [SP_JSX.jsxs("span", { children: ["CREW ", status.worker_count, "/4"] }), SP_JSX.jsxs("span", { children: ["SKYLINE ", skylineFloors, " FLOORS"] }), SP_JSX.jsxs("span", { children: ["NEXT \u00B7 ", nextReward] })] }), SP_JSX.jsxs("div", { className: "sm-skyline", "aria-label": `Twin city skyline, ${skylineFloors} floors`, children: [status.city.map((plot, index) => SP_JSX.jsx("i", { title: plot ? `${plot.name} level ${plot.level}` : "Empty site", style: { "--level": plot?.level ?? 0, "--tower": plot ? hex(plot.left) : "#294047" } }, `west-${index}`)), SP_JSX.jsx("b", { children: "\u21C5" }), [...status.city].reverse().map((plot, index) => SP_JSX.jsx("i", { title: plot ? `${plot.name} level ${plot.level}` : "Empty site", style: { "--level": plot?.level ?? 0, "--tower": plot ? hex(plot.right) : "#294047" } }, `east-${index}`))] }), SP_JSX.jsxs("small", { className: "sm-construction", children: ["TWIN ", constructionName, " \u00B7 LEVEL ", constructionLevel, " \u00B7 ", progressLabel, "%"] })] }) }), SP_JSX.jsxs("div", { className: "sm-strip-panel", children: [SP_JSX.jsxs("div", { className: "sm-strip-head", children: [SP_JSX.jsx("span", { children: "PHYSICAL BAR \u00B7 LIVE 17-PIXEL MAP" }), SP_JSX.jsx("strong", { children: ledState })] }), SP_JSX.jsx("div", { className: "sm-rail", role: "img", "aria-label": `17 LED light bar, ${status.deposit_short} at ${progressLabel} percent`, children: status.colors.map((colour, index) => { const fill = hex(colour); return SP_JSX.jsx("i", { style: { background: fill, boxShadow: `0 0 12px ${fill}` } }, index); }) }), SP_JSX.jsxs("div", { className: "sm-strip-scale", children: [SP_JSX.jsx("span", { children: "WEST CITY \u00B7 3 LEDS" }), SP_JSX.jsx("span", { children: "ACTIVE MINE" }), SP_JSX.jsx("span", { children: "EAST CITY \u00B7 3 LEDS" })] }), SP_JSX.jsx("div", { className: "sm-progress", children: SP_JSX.jsx("i", { style: { width: `${status.campaign_progress * 100}%` } }) }), SP_JSX.jsxs("div", { className: "sm-meta", children: [SP_JSX.jsxs("span", { children: ["CAMPAIGN ", Math.round(status.campaign_progress * 100), "% \u00B7 ACTIVE ", formatActive(status.active_seconds), " \u00B7 EST. ", status.campaign_estimate_hours, "H"] }), SP_JSX.jsxs("span", { children: ["ORE ", formatScore(status.ore), " \u00B7 ", status.completed_veins, "/30 VEINS"] })] })] }), SP_JSX.jsxs("div", { className: "sm-actions", children: [SP_JSX.jsxs("div", { className: "sm-actions-title", children: [SP_JSX.jsx("span", { children: "PLAYER ACTIONS" }), SP_JSX.jsx("strong", { children: status.paused ? "SHIFT PAUSED" : `A · X · Y · ${controlSource === "steam" ? "STEAM INPUT" : controlSource === "browser" ? "GAMEPAD" : "WAITING"}` })] }), SP_JSX.jsxs("div", { className: "sm-action-audio", children: [SP_JSX.jsx("span", { children: "AUDIO" }), SP_JSX.jsxs(Button, { className: music ? "on" : "", onClick: () => { const enabled = !music; if (audio.setMusic(enabled))
+    return SP_JSX.jsxs(DFL.Focusable, { className: "sm-app", navEntryPreferPosition: DFL.NavEntryPositionPreferences.PREFERRED_CHILD, style: { "--ore": ore }, children: [SP_JSX.jsx("style", { children: styles }), showIntro ? SP_JSX.jsx(Intro, { onComplete: completeIntro, tempo: status.tempo, onTempo: (value) => void setTempo(value).then(setStatus) }) : null, SP_JSX.jsxs("div", { className: "sm-shell", children: [SP_JSX.jsxs("section", { className: `sm-world-stage${finaleActive ? " sm-final-stage" : ""}`, children: [SP_JSX.jsx(World, { status: status }), SP_JSX.jsx("div", { className: "sm-vignette" }), !finaleActive ? SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs("div", { className: "sm-hud", children: [SP_JSX.jsxs("div", { className: "sm-hud-left", children: [SP_JSX.jsxs("span", { children: ["AGE ", status.age + 1, " \u00B7 ", status.age_name.toUpperCase()] }), SP_JSX.jsx("strong", { children: status.deposit_name.toUpperCase() }), SP_JSX.jsx("small", { children: status.deposit_story })] }), SP_JSX.jsxs("div", { className: "sm-hud-right", children: [SP_JSX.jsx("span", { children: lead ? `${lead.side === "left" ? "W" : "E"}${Math.floor(lead.id / 2) + 1} ${movement} · LED ${Math.round(lead.position) + 1}/17` : "SHIFT COMPLETE" }), SP_JSX.jsxs("strong", { style: { color: ore }, children: [progressLabel, "%"] }), SP_JSX.jsxs("small", { children: [formatDuration(status.remaining_seconds), " REMAINING"] })] })] }), SP_JSX.jsxs("div", { className: "sm-score-hud", children: [SP_JSX.jsx("span", { children: "CITY VALUE" }), SP_JSX.jsx("strong", { children: formatScore(status.city_value) }), SP_JSX.jsxs("small", { children: ["+", formatScore(status.production_per_minute), "/MIN \u00B7 BEST +", formatScore(status.best_delivery)] })] }), SP_JSX.jsxs("div", { className: "sm-top-controls", children: [SP_JSX.jsxs("div", { className: "sm-control-group", children: [SP_JSX.jsx("span", { children: "SHIFT TEMPO" }), SP_JSX.jsx("div", { className: "sm-tempo", "aria-label": "Shift tempo", children: TEMPOS.map((name, index) => SP_JSX.jsxs(Button, { className: status.tempo === index + 1 ? "active" : "", onClick: () => void setTempo(index + 1).then(acceptStatus), children: [SP_JSX.jsx("b", { children: name }), SP_JSX.jsx("small", { children: TEMPO_DETAILS[index] })] }, name)) })] }), SP_JSX.jsxs("div", { className: "sm-control-group", children: [SP_JSX.jsx("span", { children: "LIGHT PROFILE" }), SP_JSX.jsxs("div", { className: "sm-world-bar-mode", "aria-label": "Physical bar style", children: [SP_JSX.jsxs(Button, { "aria-pressed": !status.optical_bar, className: `luminous${!status.optical_bar ? " active" : ""}`, onClick: () => void setSetting("optical_bar", false).then(acceptStatus), children: [SP_JSX.jsx("b", { children: "LUMINOUS" }), SP_JSX.jsx("small", { children: "BRIGHT \u00B7 SOFT GLOW" })] }), SP_JSX.jsxs(Button, { "aria-pressed": status.optical_bar, className: `contrasted${status.optical_bar ? " active" : ""}`, onClick: () => void setSetting("optical_bar", true).then(acceptStatus), children: [SP_JSX.jsx("b", { children: "CONTRASTED" }), SP_JSX.jsx("small", { children: "DARK \u00B7 CLEAR GAPS" })] })] })] })] })] }) : null, SP_JSX.jsxs("div", { className: "sm-world-nav", children: [SP_JSX.jsx(Button, { onClick: () => DFL.Navigation.NavigateBack(), children: "\u2190 BACK TO STEAM" }), SP_JSX.jsx(Button, { onClick: () => setShowIntro(true), children: "REPLAY INTRO" })] }), status.hardware_owner === "SignalBar" ? SP_JSX.jsx("div", { className: "sm-alert", children: "SIGNALBAR LIGHT EVENT \u00B7 MINING CONTINUES \u00B7 BAR RETURNS AUTOMATICALLY" }) : status.hardware_owner === "other" || error ? SP_JSX.jsx("div", { className: "sm-alert", children: error || status.hardware_error }) : null, toast ? SP_JSX.jsx("div", { className: "sm-toast", children: toast.label }, toast.seq) : null, !finaleActive ? SP_JSX.jsx(ScoreCascade, { status: status }) : null, SP_JSX.jsx(FinaleOverlay, { status: status })] }), SP_JSX.jsxs("section", { className: "sm-command", children: [SP_JSX.jsx("div", { className: "sm-status-panel", children: SP_JSX.jsxs("div", { className: "sm-shift", children: [SP_JSX.jsxs("span", { className: "sm-kicker", children: ["SHIFT CONTROL \u00B7 ", status.tempo_name, " \u00D7", status.tempo] }), SP_JSX.jsx("strong", { children: status.complete ? "THE CITY REMEMBERS EVERY LIGHT" : status.reward_pending ? status.cue_label : status.convoy_held ? `CITY GATES HOLDING · ${status.pending_convoy}/4 LOADED` : status.overcharge_remaining > 0 ? "OVERCHARGE · EVERY DELIVERY ×2.25" : `FOLLOW THE CREW · STRIKE AT ${status.deposit_short}` }), SP_JSX.jsxs("p", { children: [SP_JSX.jsxs("span", { children: ["CREW ", status.worker_count, "/4"] }), SP_JSX.jsxs("span", { children: ["SKYLINE ", skylineFloors, " FLOORS"] }), SP_JSX.jsxs("span", { children: ["NEXT \u00B7 ", nextReward] })] }), SP_JSX.jsxs("div", { className: "sm-skyline", "aria-label": `Twin city skyline, ${skylineFloors} floors`, children: [status.city.map((plot, index) => SP_JSX.jsx("i", { title: plot ? `${plot.name} level ${plot.level}` : "Empty site", style: { "--level": plot?.level ?? 0, "--tower": plot ? hex(plot.left) : "#294047" } }, `west-${index}`)), SP_JSX.jsx("b", { children: "\u21C5" }), [...status.city].reverse().map((plot, index) => SP_JSX.jsx("i", { title: plot ? `${plot.name} level ${plot.level}` : "Empty site", style: { "--level": plot?.level ?? 0, "--tower": plot ? hex(plot.right) : "#294047" } }, `east-${index}`))] }), SP_JSX.jsxs("small", { className: "sm-construction", children: ["TWIN ", constructionName, " \u00B7 LEVEL ", constructionLevel, " \u00B7 ", progressLabel, "%"] })] }) }), SP_JSX.jsxs("div", { className: "sm-strip-panel", children: [SP_JSX.jsxs("div", { className: "sm-strip-head", children: [SP_JSX.jsx("span", { children: "PHYSICAL BAR \u00B7 LIVE 17-PIXEL MAP" }), SP_JSX.jsx("strong", { children: ledState })] }), SP_JSX.jsx("div", { className: "sm-rail", role: "img", "aria-label": `17 LED light bar, ${status.deposit_short} at ${progressLabel} percent`, children: status.colors.map((colour, index) => { const fill = hex(colour); return SP_JSX.jsx("i", { style: { background: fill, boxShadow: `0 0 12px ${fill}` } }, index); }) }), SP_JSX.jsxs("div", { className: "sm-strip-scale", children: [SP_JSX.jsx("span", { children: "WEST CITY \u00B7 3 LEDS" }), SP_JSX.jsx("span", { children: "ACTIVE MINE" }), SP_JSX.jsx("span", { children: "EAST CITY \u00B7 3 LEDS" })] }), SP_JSX.jsx("div", { className: "sm-progress", children: SP_JSX.jsx("i", { style: { width: `${status.campaign_progress * 100}%` } }) }), SP_JSX.jsxs("div", { className: "sm-meta", children: [SP_JSX.jsxs("span", { children: ["CAMPAIGN ", Math.round(status.campaign_progress * 100), "% \u00B7 ACTIVE ", formatActive(status.active_seconds), " \u00B7 EST. ", status.campaign_estimate_hours, "H"] }), SP_JSX.jsxs("span", { children: ["ORE ", formatScore(status.ore), " \u00B7 ", status.completed_veins, "/30 VEINS"] })] })] }), SP_JSX.jsxs("div", { className: "sm-actions", children: [SP_JSX.jsxs("div", { className: "sm-actions-title", children: [SP_JSX.jsx("span", { children: "PLAYER ACTIONS" }), SP_JSX.jsx("strong", { children: status.paused ? "SHIFT PAUSED" : `A · X · Y · ${controlSource === "steam" ? "STEAM INPUT" : controlSource === "browser" ? "GAMEPAD" : "WAITING"}` })] }), SP_JSX.jsxs("div", { className: "sm-action-audio", children: [SP_JSX.jsx("span", { children: "AUDIO" }), SP_JSX.jsxs(Button, { className: music ? "on" : "", onClick: () => { const enabled = !music; if (audio.setMusic(enabled))
                                                     setMusic(enabled); }, children: ["\u266B OST ", musicVolume, "% \u00B7 ", music ? "ON" : "OFF"] }), SP_JSX.jsxs(Button, { className: effects ? "on" : "", onClick: () => { const enabled = !effects; setEffects(enabled); audio.setEffects(enabled); if (enabled)
                                                     audio.play("critical"); }, children: ["\u2726 SFX ", effectsVolume, "% \u00B7 ", effects ? "ON" : "OFF"] })] }), SP_JSX.jsxs(Button, { className: `sm-action primary${strikeResult ? " active" : ""}`, preferredFocus: true, disabled: status.paused || status.complete || (status.reward_pending && !finaleArmed), onClick: () => void signalStrike(), children: [SP_JSX.jsx("kbd", { children: "A" }), SP_JSX.jsxs("span", { children: [SP_JSX.jsx("b", { children: finaleArmed ? "LAST STRIKE" : strikeResult || "SIGNAL STRIKE" }), SP_JSX.jsx("small", { children: finaleArmed ? "Break the Ancient Core" : strikeResult ? "Impact registered · mineral progress increased" : "Time it at the vein · next load ×1.5 or ×3" })] })] }), SP_JSX.jsxs(Button, { className: `sm-action${status.convoy_held ? " active" : ""}`, disabled: status.complete, onClick: convoy, children: [SP_JSX.jsx("kbd", { children: "X" }), SP_JSX.jsxs("span", { children: [SP_JSX.jsx("b", { children: status.convoy_held ? `BANK ${status.pending_convoy} LOADED` : "HOLD CONVOY" }), SP_JSX.jsx("small", { children: status.convoy_held ? "Release the group multiplier" : "Stack returning miners at the gates" })] })] }), SP_JSX.jsxs(Button, { className: `sm-action${status.overcharge_remaining > 0 ? " active" : ""}${status.overcharge_cooldown > 0 && status.overcharge_remaining <= 0 ? " disabled" : ""}`, disabled: status.complete || (status.overcharge_cooldown > 0 && status.overcharge_remaining <= 0), onClick: overcharge, children: [SP_JSX.jsx("kbd", { children: "Y" }), SP_JSX.jsxs("span", { children: [SP_JSX.jsx("b", { children: status.overcharge_remaining > 0 ? `OVERCHARGE ${Math.ceil(status.overcharge_remaining)}S` : status.overcharge_cooldown > 0 ? `RECHARGE ${Math.ceil(status.overcharge_cooldown / 60)}M` : "OVERCHARGE" }), SP_JSX.jsx("small", { children: "Thirty seconds at \u00D72.25 power" })] })] }), SP_JSX.jsxs("div", { className: "sm-settings-line", children: [SP_JSX.jsx("span", { children: status.message }), SP_JSX.jsxs("div", { children: [SP_JSX.jsx(Button, { className: "workshop", onClick: () => setShowWorkshop(true), children: "\u2692 WORKSHOP" }), SP_JSX.jsx(Button, { onClick: () => void apply(setPaused(!status.paused)), children: status.paused ? "RESUME" : "PAUSE" }), SP_JSX.jsxs(Button, { onClick: () => void apply(setSetting("led_enabled", !status.led_enabled)), children: ["LED ", status.led_enabled ? "ON" : "OFF"] }), status.hardware_owner === "other" ? SP_JSX.jsx(Button, { onClick: () => void apply(retryLed()), children: "RETRY BAR" }) : null, SP_JSX.jsx(Button, { onClick: () => setResetConfirm(true), children: "RESET" })] })] })] })] })] }), showWorkshop ? SP_JSX.jsx(Workshop, { status: status, onClose: () => setShowWorkshop(false), onBuy: (kind) => void buyUpgrade(kind).then((result) => acceptStatus(result.status)).catch((reason) => setError(String(reason))) }) : null, resetConfirm ? SP_JSX.jsx("div", { className: "sm-reset-confirm", children: SP_JSX.jsxs("div", { className: "sm-reset-card", children: [SP_JSX.jsx("h2", { children: "Start a new expedition?" }), SP_JSX.jsxs("p", { children: ["This permanently erases the current city, crew ranks and all ", status.completed_veins, " cleared veins. The origin story will play again."] }), SP_JSX.jsxs("div", { children: [SP_JSX.jsx(Button, { onClick: () => setResetConfirm(false), children: "Keep this city" }), SP_JSX.jsx(Button, { className: "danger", onClick: () => void resetCampaign().then((next) => { acceptStatus(next); setResetConfirm(false); setShowIntro(true); }).catch((reason) => setError(String(reason))), children: "Erase and restart" })] })] }) }) : null] });
 }
@@ -2503,7 +2533,7 @@ function QuickPanel() {
     const [effectsVolume, setEffectsVolume] = SP_REACT.useState(Math.round(sharedAudio.effectsVolume * 100));
     const [resetConfirm, setResetConfirm] = SP_REACT.useState(false);
     const audio = sharedAudio;
-    SP_REACT.useEffect(() => { audio.startDefaults(); let alive = true; const refresh = () => void getStatus().then((next) => { if (alive) {
+    SP_REACT.useEffect(() => { let alive = true; const refresh = () => void getStatus().then((next) => { if (alive) {
         setStatus(next);
         audio.onStatus(next);
         setMusic(audio.musicEnabled);
@@ -2518,9 +2548,9 @@ function QuickPanel() {
     const pageIndex = Math.floor(performance.now() / MATRIX_PAGE_MS) % QAM_PAGES.length;
     const pageLabel = status.complete ? "FINALE" : status.reward_pending ? "REWARD" : status.cue_active && status.last_cashout && status.cue_kind.startsWith("cashout") ? "SCORE" : QAM_PAGES[pageIndex];
     const progressLabel = veinPercent(status);
-    return SP_JSX.jsxs(DFL.PanelSection, { title: "StripMine", children: [SP_JSX.jsx("style", { children: styles }), SP_JSX.jsxs("div", { className: "sm-qam", children: [SP_JSX.jsxs("div", { className: "sm-qam-title", children: [SP_JSX.jsx("img", { className: "sm-qam-logo", src: STRIPMINE_LOGO_URL, alt: "", "aria-hidden": "true" }), SP_JSX.jsx("strong", { children: "STRIPMINE \u00B7 CONTROL ROOM" }), SP_JSX.jsx("i", { children: "\u25CF LIVE" })] }), SP_JSX.jsxs("div", { className: "sm-qam-matrix-panel", children: [SP_JSX.jsxs("header", { children: [SP_JSX.jsx("span", { children: "LIVE STORY MATRIX \u00B7 97K DOTS" }), SP_JSX.jsx("strong", { children: status.cue_active ? status.cue_label : `${status.deposit_short} · ${progressLabel}%` })] }), SP_JSX.jsx("div", { className: "sm-qam-matrix", children: SP_JSX.jsx(DotMatrix, { status: status }) }), SP_JSX.jsxs("div", { className: "sm-qam-pages", "aria-label": `${pageLabel} story page`, children: [QAM_PAGES.map((page, index) => SP_JSX.jsx("i", { className: !status.reward_pending && !status.complete && index === pageIndex ? "active" : "" }, page)), SP_JSX.jsx("span", { children: pageLabel })] }), SP_JSX.jsxs("footer", { children: [SP_JSX.jsxs("span", { children: [west, " WEST"] }), SP_JSX.jsx("span", { children: status.deposit_short }), SP_JSX.jsxs("span", { children: [east, " EAST"] })] })] }), SP_JSX.jsxs("div", { className: "sm-qam-stats", children: [SP_JSX.jsxs("i", { children: [SP_JSX.jsx("span", { children: "AGE" }), SP_JSX.jsxs("b", { children: [status.age + 1, " \u00B7 ", Math.round(status.campaign_progress * 100), "%"] })] }), SP_JSX.jsxs("i", { children: [SP_JSX.jsx("span", { children: "SKYLINE" }), SP_JSX.jsxs("b", { children: [floors, " FLOORS"] })] }), SP_JSX.jsxs("i", { children: [SP_JSX.jsx("span", { children: "CREW" }), SP_JSX.jsxs("b", { children: [status.worker_count, "/4 \u00B7 ", status.rank_name.toUpperCase()] })] })] }), SP_JSX.jsx("div", { className: "sm-qam-tempo", children: TEMPOS.map((name, index) => SP_JSX.jsxs(Button, { className: status.tempo === index + 1 ? "active" : "", onClick: () => update(setTempo(index + 1)), children: [SP_JSX.jsx("b", { children: name }), SP_JSX.jsxs("small", { children: ["\u00D7", index + 1] })] }, name)) }), SP_JSX.jsxs("div", { className: "sm-qam-controls", children: [SP_JSX.jsxs(Button, { className: music ? "on" : "", onClick: () => { const enabled = !music; if (audio.setMusic(enabled))
+    return SP_JSX.jsxs(DFL.PanelSection, { title: "StripMine", children: [SP_JSX.jsx("style", { children: styles }), SP_JSX.jsxs("div", { className: "sm-qam", children: [SP_JSX.jsxs("div", { className: "sm-qam-title", children: [SP_JSX.jsx("img", { className: "sm-qam-logo", src: STRIPMINE_LOGO_URL, alt: "", "aria-hidden": "true" }), SP_JSX.jsx("strong", { children: "STRIPMINE \u00B7 CONTROL ROOM" }), SP_JSX.jsx("i", { children: status.signalbar_event_active ? "● SIGNALBAR EVENT" : "● LIVE" })] }), SP_JSX.jsxs("div", { className: "sm-qam-matrix-panel", children: [SP_JSX.jsxs("header", { children: [SP_JSX.jsxs("span", { children: ["LIVE STORY MATRIX \u00B7 ", Math.round(MATRIX_DOTS / 1000), "K DOTS"] }), SP_JSX.jsx("strong", { children: status.cue_active ? status.cue_label : `${status.deposit_short} · ${progressLabel}%` })] }), SP_JSX.jsx("div", { className: "sm-qam-matrix", children: SP_JSX.jsx(DotMatrix, { status: status }) }), SP_JSX.jsxs("div", { className: "sm-qam-pages", "aria-label": `${pageLabel} story page`, children: [QAM_PAGES.map((page, index) => SP_JSX.jsx("i", { className: !status.reward_pending && !status.complete && index === pageIndex ? "active" : "" }, page)), SP_JSX.jsx("span", { children: pageLabel })] }), SP_JSX.jsxs("footer", { children: [SP_JSX.jsxs("span", { children: [west, " WEST"] }), SP_JSX.jsx("span", { children: status.deposit_short }), SP_JSX.jsxs("span", { children: [east, " EAST"] })] })] }), SP_JSX.jsxs("div", { className: "sm-qam-stats", children: [SP_JSX.jsxs("i", { children: [SP_JSX.jsx("span", { children: "AGE" }), SP_JSX.jsxs("b", { children: [status.age + 1, " \u00B7 ", Math.round(status.campaign_progress * 100), "%"] })] }), SP_JSX.jsxs("i", { children: [SP_JSX.jsx("span", { children: "SKYLINE" }), SP_JSX.jsxs("b", { children: [floors, " FLOORS"] })] }), SP_JSX.jsxs("i", { children: [SP_JSX.jsx("span", { children: "CREW" }), SP_JSX.jsxs("b", { children: [status.worker_count, "/4 \u00B7 ", status.rank_name.toUpperCase()] })] })] }), SP_JSX.jsx("div", { className: "sm-qam-tempo", children: TEMPOS.map((name, index) => SP_JSX.jsxs(Button, { className: status.tempo === index + 1 ? "active" : "", onClick: () => update(setTempo(index + 1)), children: [SP_JSX.jsx("b", { children: name }), SP_JSX.jsxs("small", { children: ["\u00D7", index + 1] })] }, name)) }), SP_JSX.jsxs("div", { className: "sm-qam-controls", children: [SP_JSX.jsxs(Button, { className: music ? "on" : "", onClick: () => { const enabled = !music; if (audio.setMusic(enabled))
                                     setMusic(enabled); }, children: ["\u266B OST ", musicVolume, "% \u00B7 ", music ? "ON" : "OFF"] }), SP_JSX.jsxs(Button, { className: effects ? "on" : "", onClick: () => { const enabled = !effects; audio.setEffects(enabled); setEffects(enabled); if (enabled)
-                                    audio.play("critical"); }, children: ["\u2726 SFX ", effectsVolume, "% \u00B7 ", effects ? "ON" : "OFF"] }), SP_JSX.jsx(Button, { className: status.paused ? "on" : "", onClick: () => update(setPaused(!status.paused)), children: status.paused ? "▶ RESUME" : "Ⅱ PAUSE" }), SP_JSX.jsxs(Button, { className: status.led_enabled ? "on" : "", onClick: () => update(setSetting("led_enabled", !status.led_enabled)), children: ["\u25B0 LED ", status.led_enabled ? "ON" : "OFF"] })] }), SP_JSX.jsxs("div", { className: "sm-qam-bar-mode", children: [SP_JSX.jsx("span", { children: "PHYSICAL BAR STYLE" }), SP_JSX.jsxs(Button, { "aria-pressed": !status.optical_bar, className: !status.optical_bar ? "active" : "", onClick: () => update(setSetting("optical_bar", false)), children: [SP_JSX.jsx("b", { children: "LUMINOUS" }), SP_JSX.jsx("small", { children: "ALPHA.13 \u00B7 BRIGHT" })] }), SP_JSX.jsxs(Button, { "aria-pressed": status.optical_bar, className: status.optical_bar ? "active" : "", onClick: () => update(setSetting("optical_bar", true)), children: [SP_JSX.jsx("b", { children: "CONTRASTED" }), SP_JSX.jsx("small", { children: "ALPHA.14 \u00B7 DARK GAPS" })] })] }), SP_JSX.jsxs("div", { className: "sm-qam-volume", children: [SP_JSX.jsx(DFL.SliderField, { label: `MUSIC · ${musicVolume}%`, value: musicVolume, min: 0, max: 100, step: 5, showValue: false, onChange: (value) => { setMusicVolume(value); audio.setMusicVolume(value / 100); } }), SP_JSX.jsx(DFL.SliderField, { label: `SFX · ${effectsVolume}%`, value: effectsVolume, min: 0, max: 100, step: 5, showValue: false, onChange: (value) => { setEffectsVolume(value); audio.setEffectsVolume(value / 100); } })] }), SP_JSX.jsxs("div", { className: "sm-qam-footer-actions", children: [SP_JSX.jsx(Button, { className: "sm-qam-reset", onClick: () => setResetConfirm(true), children: "RESET GAME" }), SP_JSX.jsx(Button, { className: "sm-qam-open", onClick: () => { DFL.Navigation.CloseSideMenus(); DFL.Navigation.Navigate("/stripmine/play"); }, children: "OPEN FULL GAME" })] }), resetConfirm ? SP_JSX.jsxs("div", { className: "sm-qam-reset-confirm", children: [SP_JSX.jsx("strong", { children: "ERASE THIS CITY?" }), SP_JSX.jsx("small", { children: "Crew, upgrades, score and all completed veins will be reset. The origin story will play next." }), SP_JSX.jsxs("div", { children: [SP_JSX.jsx(Button, { onClick: () => setResetConfirm(false), children: "CANCEL" }), SP_JSX.jsx(Button, { className: "danger", onClick: () => void resetCampaign().then((next) => { setStatus(next); setResetConfirm(false); DFL.Navigation.CloseSideMenus(); DFL.Navigation.Navigate("/stripmine/play"); }).catch(() => undefined), children: "RESET + INTRO" })] })] }) : null] })] });
+                                    audio.play("critical"); }, children: ["\u2726 SFX ", effectsVolume, "% \u00B7 ", effects ? "ON" : "OFF"] }), SP_JSX.jsx(Button, { className: status.paused ? "on" : "", onClick: () => update(setPaused(!status.paused)), children: status.paused ? "▶ RESUME" : "Ⅱ PAUSE" }), SP_JSX.jsxs(Button, { className: status.led_enabled ? "on" : "", onClick: () => update(setSetting("led_enabled", !status.led_enabled)), children: ["\u25B0 LED ", status.led_enabled ? "ON" : "OFF"] })] }), SP_JSX.jsxs("div", { className: "sm-qam-bar-mode", children: [SP_JSX.jsx("span", { children: "PHYSICAL BAR STYLE" }), SP_JSX.jsxs(Button, { "aria-pressed": !status.optical_bar, className: !status.optical_bar ? "active" : "", onClick: () => update(setSetting("optical_bar", false)), children: [SP_JSX.jsx("b", { children: "LUMINOUS" }), SP_JSX.jsx("small", { children: "BRIGHT \u00B7 SOFT GLOW" })] }), SP_JSX.jsxs(Button, { "aria-pressed": status.optical_bar, className: status.optical_bar ? "active" : "", onClick: () => update(setSetting("optical_bar", true)), children: [SP_JSX.jsx("b", { children: "CONTRASTED" }), SP_JSX.jsx("small", { children: "DARK \u00B7 CLEAR GAPS" })] })] }), SP_JSX.jsxs("div", { className: "sm-qam-volume", children: [SP_JSX.jsx(DFL.SliderField, { label: `MUSIC · ${musicVolume}%`, value: musicVolume, min: 0, max: 100, step: 5, showValue: false, onChange: (value) => { setMusicVolume(value); audio.setMusicVolume(value / 100); } }), SP_JSX.jsx(DFL.SliderField, { label: `SFX · ${effectsVolume}%`, value: effectsVolume, min: 0, max: 100, step: 5, showValue: false, onChange: (value) => { setEffectsVolume(value); audio.setEffectsVolume(value / 100); } })] }), SP_JSX.jsxs("div", { className: "sm-qam-footer-actions", children: [SP_JSX.jsx(Button, { className: "sm-qam-reset", onClick: () => setResetConfirm(true), children: "RESET GAME" }), SP_JSX.jsx(Button, { className: "sm-qam-open", onClick: () => { DFL.Navigation.CloseSideMenus(); DFL.Navigation.Navigate("/stripmine/play"); }, children: "OPEN FULL GAME" })] }), resetConfirm ? SP_JSX.jsxs("div", { className: "sm-qam-reset-confirm", children: [SP_JSX.jsx("strong", { children: "ERASE THIS CITY?" }), SP_JSX.jsx("small", { children: "Crew, upgrades, score and all completed veins will be reset. The origin story will play next." }), SP_JSX.jsxs("div", { children: [SP_JSX.jsx(Button, { onClick: () => setResetConfirm(false), children: "CANCEL" }), SP_JSX.jsx(Button, { className: "danger", onClick: () => void resetCampaign().then((next) => { setStatus(next); setResetConfirm(false); DFL.Navigation.CloseSideMenus(); DFL.Navigation.Navigate("/stripmine/play"); }).catch(() => undefined), children: "RESET + INTRO" })] })] }) : null] })] });
 }
 var index = definePlugin(() => {
     routerHook.addRoute("/stripmine/play", Game);
