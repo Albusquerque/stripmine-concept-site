@@ -16,6 +16,8 @@ try {
   assert.equal(response?.status(), 200);
   assert.equal(await page.locator(".view-tab").count(), 3);
   assert.match(await page.title(), /StripMine/);
+  assert.equal((await page.locator(".brand-wordmark").innerText()).replace(/\s/g, ""), "StripMine");
+  assert.match(await page.locator(".brand-logo").getAttribute("src"), /stripmine-logo\.png$/);
   await page.frameLocator("#game-frame").locator("body").waitFor();
 
   await page.locator('[data-view="decky"]').click();
