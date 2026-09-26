@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#091115">
+  <meta name="description" content="StripMine — one mining shift translated across television, Decky and a physical 17-LED light bar.">
+  <meta property="og:title" content="StripMine · One shift, three living surfaces">
+  <meta property="og:description" content="A persistent mining city built across television, Decky and the Steam Machine's 17-LED light bar.">
+  <meta property="og:image" content="https://albusquerque.github.io/stripmine-concept-site/assets/stripmine-logo.png">
+  <meta property="og:url" content="https://albusquerque.github.io/stripmine-concept-site/">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>StripMine · One shift, three living surfaces</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page-shell" data-current-view="game">
+    <header class="masthead">
+      <a class="brand" href="#top" aria-label="StripMine home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span>STRIP<span>MINE</span></span>
+      </a>
+      <nav aria-label="Page navigation"><a href="#showcase">LIVE SHOWCASE</a><a href="https://github.com/Albusquerque/StripMine/releases/tag/v0.1.0">DOWNLOAD V0.1.0</a><a href="https://github.com/Albusquerque/StripMine">SOURCE</a></nav>
+    </header>
+
+    <section class="hero" id="top">
+      <div class="hero-copy">
+        <span class="eyebrow"><i></i> A DECKY IDLE GAME FOR 17 PHYSICAL LIGHTS</span>
+        <h1>ONE SHIFT.<br><em>THREE LIVING SURFACES.</em></h1>
+        <p>The television reveals the city. Decky becomes its control room. The Steam Machine light seam keeps the mine alive at a glance.</p>
+        <div class="hero-actions"><a class="hero-action" href="#showcase">EXPLORE THE LIVE BUILD <span>↓</span></a><a class="hero-action secondary" href="https://github.com/Albusquerque/StripMine/releases/tag/v0.1.0">DOWNLOAD V0.1.0 <span>↗</span></a></div>
+      </div>
+      <div class="hero-logo-panel" aria-label="StripMine official logo">
+        <img src="assets/stripmine-logo.png" width="1254" height="1254" alt="StripMine — pixel-art mine, city and pickaxe logo">
+        <p><strong>ONE LIVE SAVE</strong> · One mining shift across the television, Decky and seventeen physical lights.</p>
+      </div>
+    </section>
+
+    <section class="showcase" id="showcase" aria-labelledby="showcase-title">
+      <header class="section-heading">
+        <div><span class="eyebrow">THE CONNECTED EXPERIENCE</span><h2 id="showcase-title">The same shift, told three ways.</h2></div>
+        <p>Switch surfaces below. The television and Decky views run the real v0.1.0 bundle; the physical view simulates its seventeen source LEDs and their diffusion.</p>
+      </header>
+
+      <nav class="view-tabs" aria-label="Preview form">
+        <button class="view-tab is-active" type="button" data-view="game"><span>01</span><i>▣</i><b>FULL GAME</b><small>The living city</small></button>
+        <button class="view-tab" type="button" data-view="decky"><span>02</span><i>▦</i><b>DECKY TAB</b><small>The control room</small></button>
+        <button class="view-tab" type="button" data-view="physical"><span>03</span><i>▰</i><b>LIGHT BAR</b><small>The ambient story</small></button>
+      </nav>
+
+      <div class="preview-shell">
+        <section class="preview-view game-view is-active" data-preview="game" aria-label="Full game preview">
+          <div class="tv-set"><div class="tv-bezel"><div class="tv-screen-scale"><iframe id="game-frame" src="demo/plugin.html?v=32" title="Interactive StripMine full game v0.1.0"></iframe></div><div class="screen-glass"></div></div><div class="tv-signature"><span></span><b>LIVE BUILD · V0.1.0</b><span></span></div></div>
+        </section>
+
+        <section class="preview-view decky-view" data-preview="decky" aria-label="Decky panel preview">
+          <div class="steam-screen">
+            <div class="steam-topbar"><span>‹</span><strong>LIBRARY</strong><em>12:41&nbsp;&nbsp; ◉ 84%</em></div>
+            <div class="steam-library"><div class="library-art"><strong>STRIPMINE</strong><span>The mine keeps running behind Decky.</span></div><div class="library-cards"><i></i><i></i><i></i></div></div>
+            <aside class="decky-drawer"><div class="drawer-head"><b>QUICK ACCESS</b><span>•••</span></div><iframe id="decky-frame" data-src="demo/plugin.html?v=32#panel" title="Interactive StripMine Decky panel v0.1.0"></iframe></aside>
+            <div class="steam-bottombar"><span>Ⓑ BACK</span><span>Ⓐ SELECT</span></div>
+          </div>
+        </section>
+
+        <section class="preview-view physical-view" data-preview="physical" aria-label="Physical LED strip preview">
+          <div class="physical-stage">
+            <div class="stage-context"><span class="status-dot"></span><strong id="stage-context">AGE I · EXTRACTING</strong><span id="stage-badge">NORMAL · ×2</span></div>
+            <div class="machine-scene">
+              <div class="scene-wall-line"></div><div class="scene-shelf"></div><span class="machine-measure">FRONT VIEW · 156 × 152 MM</span>
+              <div class="steam-machine" aria-label="Front view of the Steam Machine and its diffused LED seam">
+                <div class="cube-face"></div><div class="led-seam"><canvas id="led-canvas" aria-label="Diffused physical light bar simulated from 17 LEDs"></canvas></div>
+                <div class="machine-front"><i class="port"></i><i class="port"></i><i class="sd-slot"></i><i class="power-led"></i><i class="power-button"></i></div>
+              </div>
+            </div>
+            <div class="logical-panel">
+              <div class="logical-head"><div><span>LOGICAL PREVIEW · 17 INDIVIDUAL LEDS</span><strong id="signal-name">SHUTTLE → STRIKE → RETURN</strong></div><em id="route-label">2 WORKERS · 4-CELL EMERALD</em></div>
+              <div class="logical-strip" id="logical-strip" aria-label="Logical 17 LED source map"></div>
+              <div class="logical-zones"><span>WEST CITY</span><span>OPEN MINE</span><span>EAST CITY</span></div>
+              <p id="strip-caption">Orange workers cross the open cave. The four-cell emerald vein shrinks as it is mined; loaded workers briefly inherit its green.</p>
+            </div>
+            <div class="simulation-note"><i>i</i><span>Browser simulation. The row exposes the seventeen source pixels; the machine above shows how its diffuser blends them into one continuous light seam.</span></div>
+          </div>
+        </section>
+      </div>
+
+      <section class="view-summary" aria-live="polite">
+        <div><span id="signal-kicker">01 · PRIMARY VIEW</span><h3 id="signal-title">BUILD THE CITY. FEEL EVERY DELIVERY.</h3></div>
+        <p id="signal-description">The full 16:9 world carries the drama: workers cross the mine, buildings climb floor by floor and every score becomes architecture.</p>
+        <span class="live-chip">● LIVE V0.1.0</span>
+      </section>
+
+      <section class="optical-lab" id="optical-lab" aria-labelledby="lab-title" hidden>
+        <header><div><span class="eyebrow">PHYSICAL SIGNAL LAB</span><h3 id="lab-title">Tune what the diffuser will actually show.</h3></div><p>The selected profile is shared instantly by the full game, Decky and the physical light bar.</p></header>
+        <div class="lab-controls">
+          <fieldset><legend>LIGHT PROFILE</legend><div class="segmented two"><button class="style-button is-active" type="button" data-style="luminous" aria-pressed="true"><i class="luminous-swatch"></i>LUMINOUS</button><button class="style-button" type="button" data-style="contrasted" aria-pressed="false"><i class="contrasted-swatch"></i>CONTRASTED</button></div><small id="style-note">Maximum colour and glow for a bright room or a less aggressive diffuser.</small></fieldset>
+          <fieldset><legend>SHIFT TEMPO</legend><div class="segmented four tempo-buttons"><button type="button" data-tempo="1">CHILL <small>×1</small></button><button class="is-active" type="button" data-tempo="2">NORMAL <small>×2</small></button><button type="button" data-tempo="3">NERVOUS <small>×3</small></button><button type="button" data-tempo="4">COCAINE <small>×4</small></button></div></fieldset>
+          <fieldset><div class="field-head"><legend>VEIN DEPLETION</legend><output id="progress-output" for="progress-range">18%</output></div><input id="progress-range" type="range" min="0" max="100" value="18" step="1"><div class="range-labels"><span>4 CELLS</span><span>1 CELL</span></div></fieldset>
+          <fieldset><legend>EVENT</legend><div class="segmented four event-buttons"><button class="event-button is-active" type="button" data-event="mining">MINING</button><button class="event-button" type="button" data-event="delivery">DELIVERY</button><button class="event-button" type="button" data-event="promotion">PROMOTION</button><button class="event-button" type="button" data-event="finale">FINALE</button></div></fieldset>
+        </div>
+      </section>
+    </section>
+
+    <section class="principles" id="principles" aria-labelledby="principles-title">
+      <header><span class="eyebrow">VISUAL HIERARCHY</span><h2 id="principles-title">One purpose per surface.</h2></header>
+      <div class="principle-grid">
+        <article><span>01</span><strong>TELEVISION = EMOTION</strong><p>Characters, architecture, scoring and the long-form progression live here.</p></article>
+        <article><span>02</span><strong>DECKY = DECISION</strong><p>Five story cards and the controls needed while the game continues behind them.</p></article>
+        <article><span>03</span><strong>LIGHT BAR = GLANCE</strong><p>City at the edges, mine in the centre, workers in motion. Nothing else competes.</p></article>
+      </div>
+    </section>
+
+    <footer><strong>STRIPMINE · V0.1.0</strong><p>A city-building idle game played across a television, Decky and seventeen physical lights.</p><span><a href="https://github.com/Albusquerque/StripMine">GITHUB</a> · <a href="https://github.com/Albusquerque/StripMine/releases/tag/v0.1.0">DOWNLOAD</a></span></footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
