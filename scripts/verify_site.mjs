@@ -1,11 +1,15 @@
 /** Smoke-test all three published views and the shared optical profile control. */
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 const baseUrl = process.env.STRIPMINE_SITE_URL || "http://127.0.0.1:8772/";
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const errors = [];
+const harnessSource = readFileSync(new URL("../demo/plugin-harness.js", import.meta.url), "utf8");
+assert.match(harnessSource, /const BASE_WORKER_CYCLE_SECONDS = 22;/);
+assert.doesNotMatch(harnessSource, /elapsed % 8|elapsed \/ 8/);
 page.on("pageerror", (error) => errors.push(error.message));
 page.on("console", (message) => {
   if (message.type() === "error") errors.push(message.text());

@@ -51,6 +51,7 @@ window.DFL = {
 
 const blue = [5, 66, 176];
 const yellow = [255, 205, 55];
+const BASE_WORKER_CYCLE_SECONDS = 22;
 const deposits = [
   { name: "Red Ferrite", short: "FERRITE", color: [237, 68, 61], secondary: [255, 115, 40], light: [255, 161, 126], center: 10, icon: "shard", pattern: "GROW", story: "A tiny ember inside the factory-blue rock." },
   { name: "Branching Emerald", short: "EMERALD", color: [20, 183, 101], secondary: [74, 220, 154], light: [116, 255, 181], center: 9, icon: "branch", pattern: "BRANCH", story: "Green rock forks into two pockets and divides the crew." },
@@ -176,14 +177,14 @@ function liveStatus() {
   simulationSeconds += Math.max(0, Math.min(.25, (now - lastSimulationTick) / 1000)) * simTempo;
   lastSimulationTick = now;
   const elapsed = simulationSeconds;
-  const journey = (elapsed % 8) / 8;
+  const journey = (elapsed % BASE_WORKER_CYCLE_SECONDS) / BASE_WORKER_CYCLE_SECONDS;
   const outbound = journey < .5;
   const smooth = (value) => .5 - .5 * Math.cos(Math.PI * Math.max(0, Math.min(1, value)));
   const local = journey < .46 ? smooth(journey / .46) : journey <= .54 ? 1 : smooth(1 - (journey - .54) / .46);
   const leftPosition = 3 + local * (deposit.center - 3);
   const rightPosition = 13 - local * (13 - deposit.center);
-  const cycle = Math.floor(elapsed / 8);
-  const impactSeq = Math.floor(elapsed / 8 + .5);
+  const cycle = Math.floor(elapsed / BASE_WORKER_CYCLE_SECONDS);
+  const impactSeq = Math.floor(elapsed / BASE_WORKER_CYCLE_SECONDS + .5);
   const workerCount = Math.min(4, 1 + previewCompletedVeins);
   if (convoyHeld && !outbound && local > .72) {
     for (let workerId = 0; workerId < workerCount; workerId += 1) previewHeldWorkers.add(workerId);
@@ -202,7 +203,7 @@ function liveStatus() {
     const held = previewHeldWorkers.has(id);
     const home = side === "left" ? 3 : 13;
     const position = held ? home : side === "left" ? leftPosition : rightPosition;
-    return { id, side, rank: 0, position, home, target: deposit.center, outbound: outbound && !held, rank_name: "Apprentice", power: 1, loaded: !outbound || held, held, payload: 17, trips: cycle + 1, boost: 1, impact_seq: impactSeq, impact_age: 0 };
+    return { id, side, rank: 0, position, home, target: deposit.center, outbound: outbound && !held, rank_name: "Apprentice", power: 1, loaded: !outbound || held, held, payload: 17, trips: cycle, boost: 1, impact_seq: impactSeq, impact_age: 0 };
   });
   const mineralOrder = [deposit.center, deposit.center - 1, deposit.center + 1, deposit.center - 2];
   const mineralCells = mineralOrder.slice(0, Math.max(1, Math.ceil((1 - previewProgress) * 4))).sort((a, b) => a - b);
@@ -223,7 +224,7 @@ function liveStatus() {
     version: "0.1.0-demo", age: 0, age_name: "Foundation", rank_name: "Apprentice", rank_color: yellow,
     deposit: previewDeposit, deposit_name: deposit.name, deposit_short: deposit.short, deposit_color: deposit.color, deposit_light: deposit.light,
     deposit_icon: deposit.icon, deposit_pattern: deposit.pattern, deposit_story: deposit.story,
-    progress: previewProgress, campaign_progress: (previewCompletedVeins + previewProgress) / 30, remaining_seconds: 111600, active_seconds: 900 + realElapsed, shift_seconds: 900 + elapsed,
+    progress: previewProgress, campaign_progress: (previewCompletedVeins + previewProgress) / 30, remaining_seconds: 111600, active_seconds: realElapsed, shift_seconds: elapsed,
     tempo: simTempo, tempo_name: ["CHILL", "NORMAL", "NERVOUS", "COCAINE"][simTempo - 1], campaign_estimate_hours: [63, 31.5, 21, 15.75][simTempo - 1], score_presentation_ms: [900, 650, 475, 320][simTempo - 1],
     ore: previewOre, city_value: previewOre, production_per_minute: 29, best_delivery: previewLastCashout.total, completed_veins: previewCompletedVeins,
     workers, worker_count: workerCount, city, paused: false, convoy_held: convoyHeld, pending_convoy: workers.filter((worker) => worker.held).length,
@@ -321,7 +322,7 @@ window.__DECKY_SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED_deckyLoaderAPIIn
 
 window.__STRIPMINE_PREVIEW_LOGO__ = new URL("../assets/stripmine-logo.png", window.location.href).href;
 
-const pluginModule = await import("../dist/index.js?v=40");
+const pluginModule = await import("../dist/index.js?v=43");
 const plugin = pluginModule.default();
 if (!registeredGame) throw new Error("StripMine route was not registered");
 previewRoot = createRoot(document.getElementById("root"));
