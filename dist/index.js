@@ -1771,8 +1771,8 @@ function miner(ctx, worker, x, ground, time, strikeProgress, cargoColour, cargoL
         ctx.save();
         ctx.translate(head.x, head.y);
         ctx.rotate(toolAngle + Math.PI / 2);
-        // The outer facing transform mirrors this for the east crew, keeping the long point vein-side.
-        ctx.scale(-1, 1);
+        // Human-scale tool: shoulder-width head, with the long point on the striking side.
+        ctx.scale(.72, .72);
         poly("#071012", [[-7, -3], [7, -3], [7, 87], [4, 94], [1, 98], [-3, 98], [-7, 88]]);
         poly("#5d3b26", [[-4, 0], [4, 0], [4, 85], [2, 92], [-2, 94], [-4, 86]]);
         poly("#815133", [[-2, 3], [0, 3], [0, 84], [-2, 89]]);
