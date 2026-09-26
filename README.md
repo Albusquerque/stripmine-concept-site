@@ -8,7 +8,7 @@ The interactive presentation for [StripMine](https://github.com/Albusquerque/Str
 
 ## Three synchronized views
 
-- **Full game** runs the real compiled v0.1.0 television interface.
+- **Full game** runs the real compiled v0.1.1 television interface.
 - **Decky tab** runs the same save as a compact control room with five rotating Dot Matrix cards.
 - **Light bar** explains the 17 logical LEDs and simulates their continuous physical diffusion.
 

@@ -221,7 +221,7 @@ function liveStatus() {
   const cueAge = actionCue ? performance.now() - actionCue.at : Infinity;
   const actionActive = cueAge < 2200;
   return {
-    version: "0.1.0-demo", age: 0, age_name: "Foundation", rank_name: "Apprentice", rank_color: yellow,
+    version: "0.1.1-demo", age: 0, age_name: "Foundation", rank_name: "Apprentice", rank_color: yellow,
     deposit: previewDeposit, deposit_name: deposit.name, deposit_short: deposit.short, deposit_color: deposit.color, deposit_light: deposit.light,
     deposit_icon: deposit.icon, deposit_pattern: deposit.pattern, deposit_story: deposit.story,
     progress: previewProgress, campaign_progress: (previewCompletedVeins + previewProgress) / 30, remaining_seconds: 111600, active_seconds: realElapsed, shift_seconds: elapsed,
@@ -322,7 +322,7 @@ window.__DECKY_SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED_deckyLoaderAPIIn
 
 window.__STRIPMINE_PREVIEW_LOGO__ = new URL("../assets/stripmine-logo.png", window.location.href).href;
 
-const pluginModule = await import("../dist/index.js?v=46");
+const pluginModule = await import("../dist/index.js?v=47");
 const plugin = pluginModule.default();
 if (!registeredGame) throw new Error("StripMine route was not registered");
 previewRoot = createRoot(document.getElementById("root"));
