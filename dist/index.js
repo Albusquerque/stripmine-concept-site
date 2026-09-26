@@ -51,10 +51,26 @@ class StripMineAudio {
     lastCashout = -1;
     lastReward = -1;
     workerImpacts = new Map();
-    musicEnabled = false;
-    effectsEnabled = true;
+    defaultUnlock = null;
+    musicEnabled = this.readEnabled("stripmine.musicEnabled", true);
+    effectsEnabled = this.readEnabled("stripmine.effectsEnabled", true);
     musicVolume = this.readVolume("stripmine.musicVolume", 0.8);
     effectsVolume = this.readVolume("stripmine.effectsVolume", 0.65);
+    readEnabled(key, fallback) {
+        try {
+            const raw = window.localStorage.getItem(key);
+            return raw === null ? fallback : raw === "true";
+        }
+        catch {
+            return fallback;
+        }
+    }
+    writeEnabled(key, enabled) {
+        try {
+            window.localStorage.setItem(key, String(enabled));
+        }
+        catch { /* Decky storage may be unavailable during bootstrap. */ }
+    }
     readVolume(key, fallback) {
         try {
             const raw = window.localStorage.getItem(key);
@@ -430,19 +446,59 @@ class StripMineAudio {
             this.step = (this.step + 1) % 64;
         }
     };
+    startMusicScheduler(context) {
+        if (!this.musicEnabled || context !== this.context || context.state !== "running")
+            return;
+        window.clearInterval(this.timer);
+        this.step = 0;
+        this.nextNote = context.currentTime + 0.05;
+        this.scheduler();
+        this.timer = window.setInterval(this.scheduler, 45);
+    }
+    clearDefaultUnlock() {
+        if (!this.defaultUnlock)
+            return;
+        window.removeEventListener("pointerdown", this.defaultUnlock, true);
+        window.removeEventListener("keydown", this.defaultUnlock, true);
+        this.defaultUnlock = null;
+    }
+    startDefaults() {
+        const unlock = () => {
+            if (this.musicEnabled)
+                this.setMusic(true);
+            else if (this.effectsEnabled)
+                this.ensure();
+            if (this.context?.state === "running")
+                this.clearDefaultUnlock();
+        };
+        unlock();
+        if (this.context?.state !== "running" && !this.defaultUnlock) {
+            this.defaultUnlock = unlock;
+            window.addEventListener("pointerdown", unlock, true);
+            window.addEventListener("keydown", unlock, true);
+        }
+    }
     setMusic(enabled) {
-        if (enabled && !this.ensure())
-            return false;
         this.musicEnabled = enabled;
+        this.writeEnabled("stripmine.musicEnabled", enabled);
         window.clearInterval(this.timer);
         this.timer = 0;
-        if (enabled && this.context) {
-            this.step = 0;
-            this.nextNote = this.context.currentTime + 0.05;
-            this.scheduler();
-            this.timer = window.setInterval(this.scheduler, 45);
-        }
+        if (!enabled)
+            return true;
+        const context = this.ensure();
+        if (!context)
+            return false;
+        if (context.state === "running")
+            this.startMusicScheduler(context);
+        else
+            void context.resume().then(() => this.startMusicScheduler(context)).catch(() => undefined);
         return true;
+    }
+    setEffects(enabled) {
+        this.effectsEnabled = enabled;
+        this.writeEnabled("stripmine.effectsEnabled", enabled);
+        if (enabled)
+            this.ensure();
     }
     setMusicVolume(value) {
         this.musicVolume = Math.max(0, Math.min(1, value));
@@ -585,6 +641,7 @@ class StripMineAudio {
         this.lastReward = status.reward_seq;
     }
     dispose() {
+        this.clearDefaultUnlock();
         window.clearInterval(this.timer);
         this.timer = 0;
         void this.context?.close().catch(() => undefined);
@@ -2299,8 +2356,8 @@ function Game() {
     const [status, setStatus] = SP_REACT.useState(null);
     const [error, setError] = SP_REACT.useState("");
     const [showIntro, setShowIntro] = SP_REACT.useState(false);
-    const [music, setMusic] = SP_REACT.useState(false);
-    const [effects, setEffects] = SP_REACT.useState(true);
+    const [music, setMusic] = SP_REACT.useState(sharedAudio.musicEnabled);
+    const [effects, setEffects] = SP_REACT.useState(sharedAudio.effectsEnabled);
     const [musicVolume] = SP_REACT.useState(Math.round(sharedAudio.musicVolume * 100));
     const [effectsVolume] = SP_REACT.useState(Math.round(sharedAudio.effectsVolume * 100));
     const [resetConfirm, setResetConfirm] = SP_REACT.useState(false);
@@ -2310,6 +2367,7 @@ function Game() {
     const audio = sharedAudio;
     const introInitialized = SP_REACT.useRef(false);
     const strikePending = SP_REACT.useRef(false);
+    SP_REACT.useEffect(() => { audio.startDefaults(); }, [audio]);
     const acceptStatus = SP_REACT.useCallback((next) => {
         setStatus((previous) => {
             if (previous && next.cue_seq > previous.cue_seq) {
@@ -2434,7 +2492,7 @@ function Game() {
     const strikeResult = status.cue_active ? status.cue_kind === "critical" ? "PERFECT SIGNAL ×3" : status.cue_kind === "strike" ? "SIGNAL LOCKED ×1.5" : status.cue_kind === "miss" ? "DISTANT ECHO +PROGRESS" : "" : "";
     const progressLabel = veinPercent(status);
     return SP_JSX.jsxs(DFL.Focusable, { className: "sm-app", navEntryPreferPosition: DFL.NavEntryPositionPreferences.PREFERRED_CHILD, style: { "--ore": ore }, children: [SP_JSX.jsx("style", { children: styles }), showIntro ? SP_JSX.jsx(Intro, { onComplete: completeIntro, tempo: status.tempo, onTempo: (value) => void setTempo(value).then(setStatus) }) : null, SP_JSX.jsxs("div", { className: "sm-shell", children: [SP_JSX.jsxs("section", { className: `sm-world-stage${finaleActive ? " sm-final-stage" : ""}`, children: [SP_JSX.jsx(World, { status: status }), SP_JSX.jsx("div", { className: "sm-vignette" }), !finaleActive ? SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsxs("div", { className: "sm-hud", children: [SP_JSX.jsxs("div", { className: "sm-hud-left", children: [SP_JSX.jsxs("span", { children: ["AGE ", status.age + 1, " \u00B7 ", status.age_name.toUpperCase()] }), SP_JSX.jsx("strong", { children: status.deposit_name.toUpperCase() }), SP_JSX.jsx("small", { children: status.deposit_story })] }), SP_JSX.jsxs("div", { className: "sm-hud-right", children: [SP_JSX.jsx("span", { children: lead ? `${lead.side === "left" ? "W" : "E"}${Math.floor(lead.id / 2) + 1} ${movement} · LED ${Math.round(lead.position) + 1}/17` : "SHIFT COMPLETE" }), SP_JSX.jsxs("strong", { style: { color: ore }, children: [progressLabel, "%"] }), SP_JSX.jsxs("small", { children: [formatDuration(status.remaining_seconds), " REMAINING"] })] })] }), SP_JSX.jsxs("div", { className: "sm-score-hud", children: [SP_JSX.jsx("span", { children: "CITY VALUE" }), SP_JSX.jsx("strong", { children: formatScore(status.city_value) }), SP_JSX.jsxs("small", { children: ["+", formatScore(status.production_per_minute), "/MIN \u00B7 BEST +", formatScore(status.best_delivery)] })] }), SP_JSX.jsxs("div", { className: "sm-top-controls", children: [SP_JSX.jsxs("div", { className: "sm-control-group", children: [SP_JSX.jsx("span", { children: "SHIFT TEMPO" }), SP_JSX.jsx("div", { className: "sm-tempo", "aria-label": "Shift tempo", children: TEMPOS.map((name, index) => SP_JSX.jsxs(Button, { className: status.tempo === index + 1 ? "active" : "", onClick: () => void setTempo(index + 1).then(acceptStatus), children: [SP_JSX.jsx("b", { children: name }), SP_JSX.jsx("small", { children: TEMPO_DETAILS[index] })] }, name)) })] }), SP_JSX.jsxs("div", { className: "sm-control-group", children: [SP_JSX.jsx("span", { children: "LIGHT PROFILE" }), SP_JSX.jsxs("div", { className: "sm-world-bar-mode", "aria-label": "Physical bar style", children: [SP_JSX.jsxs(Button, { "aria-pressed": !status.optical_bar, className: `luminous${!status.optical_bar ? " active" : ""}`, onClick: () => void setSetting("optical_bar", false).then(acceptStatus), children: [SP_JSX.jsx("b", { children: "LUMINOUS" }), SP_JSX.jsx("small", { children: "BRIGHT \u00B7 SOFT GLOW" })] }), SP_JSX.jsxs(Button, { "aria-pressed": status.optical_bar, className: `contrasted${status.optical_bar ? " active" : ""}`, onClick: () => void setSetting("optical_bar", true).then(acceptStatus), children: [SP_JSX.jsx("b", { children: "CONTRASTED" }), SP_JSX.jsx("small", { children: "DARK \u00B7 CLEAR GAPS" })] })] })] })] })] }) : null, SP_JSX.jsxs("div", { className: "sm-world-nav", children: [SP_JSX.jsx(Button, { onClick: () => DFL.Navigation.NavigateBack(), children: "\u2190 BACK TO STEAM" }), SP_JSX.jsx(Button, { onClick: () => setShowIntro(true), children: "REPLAY INTRO" })] }), status.hardware_owner === "other" || error ? SP_JSX.jsx("div", { className: "sm-alert", children: error || status.hardware_error }) : null, toast ? SP_JSX.jsx("div", { className: "sm-toast", children: toast.label }, toast.seq) : null, !finaleActive ? SP_JSX.jsx(ScoreCascade, { status: status }) : null, SP_JSX.jsx(FinaleOverlay, { status: status })] }), SP_JSX.jsxs("section", { className: "sm-command", children: [SP_JSX.jsx("div", { className: "sm-status-panel", children: SP_JSX.jsxs("div", { className: "sm-shift", children: [SP_JSX.jsxs("span", { className: "sm-kicker", children: ["SHIFT CONTROL \u00B7 ", status.tempo_name, " \u00D7", status.tempo] }), SP_JSX.jsx("strong", { children: status.complete ? "THE CITY REMEMBERS EVERY LIGHT" : status.reward_pending ? status.cue_label : status.convoy_held ? `CITY GATES HOLDING · ${status.pending_convoy}/4 LOADED` : status.overcharge_remaining > 0 ? "OVERCHARGE · EVERY DELIVERY ×2.25" : `FOLLOW THE CREW · STRIKE AT ${status.deposit_short}` }), SP_JSX.jsxs("p", { children: [SP_JSX.jsxs("span", { children: ["CREW ", status.worker_count, "/4"] }), SP_JSX.jsxs("span", { children: ["SKYLINE ", skylineFloors, " FLOORS"] }), SP_JSX.jsxs("span", { children: ["NEXT \u00B7 ", nextReward] })] }), SP_JSX.jsxs("div", { className: "sm-skyline", "aria-label": `Twin city skyline, ${skylineFloors} floors`, children: [status.city.map((plot, index) => SP_JSX.jsx("i", { title: plot ? `${plot.name} level ${plot.level}` : "Empty site", style: { "--level": plot?.level ?? 0, "--tower": plot ? hex(plot.left) : "#294047" } }, `west-${index}`)), SP_JSX.jsx("b", { children: "\u21C5" }), [...status.city].reverse().map((plot, index) => SP_JSX.jsx("i", { title: plot ? `${plot.name} level ${plot.level}` : "Empty site", style: { "--level": plot?.level ?? 0, "--tower": plot ? hex(plot.right) : "#294047" } }, `east-${index}`))] }), SP_JSX.jsxs("small", { className: "sm-construction", children: ["TWIN ", constructionName, " \u00B7 LEVEL ", constructionLevel, " \u00B7 ", progressLabel, "%"] })] }) }), SP_JSX.jsxs("div", { className: "sm-strip-panel", children: [SP_JSX.jsxs("div", { className: "sm-strip-head", children: [SP_JSX.jsx("span", { children: "PHYSICAL BAR \u00B7 LIVE 17-PIXEL MAP" }), SP_JSX.jsx("strong", { children: ledState })] }), SP_JSX.jsx("div", { className: "sm-rail", role: "img", "aria-label": `17 LED light bar, ${status.deposit_short} at ${progressLabel} percent`, children: status.colors.map((colour, index) => { const fill = hex(colour); return SP_JSX.jsx("i", { style: { background: fill, boxShadow: `0 0 12px ${fill}` } }, index); }) }), SP_JSX.jsxs("div", { className: "sm-strip-scale", children: [SP_JSX.jsx("span", { children: "WEST CITY \u00B7 3 LEDS" }), SP_JSX.jsx("span", { children: "ACTIVE MINE" }), SP_JSX.jsx("span", { children: "EAST CITY \u00B7 3 LEDS" })] }), SP_JSX.jsx("div", { className: "sm-progress", children: SP_JSX.jsx("i", { style: { width: `${status.campaign_progress * 100}%` } }) }), SP_JSX.jsxs("div", { className: "sm-meta", children: [SP_JSX.jsxs("span", { children: ["CAMPAIGN ", Math.round(status.campaign_progress * 100), "% \u00B7 ACTIVE ", formatActive(status.active_seconds), " \u00B7 EST. ", status.campaign_estimate_hours, "H"] }), SP_JSX.jsxs("span", { children: ["ORE ", formatScore(status.ore), " \u00B7 ", status.completed_veins, "/30 VEINS"] })] })] }), SP_JSX.jsxs("div", { className: "sm-actions", children: [SP_JSX.jsxs("div", { className: "sm-actions-title", children: [SP_JSX.jsx("span", { children: "PLAYER ACTIONS" }), SP_JSX.jsx("strong", { children: status.paused ? "SHIFT PAUSED" : `A · X · Y · ${controlSource === "steam" ? "STEAM INPUT" : controlSource === "browser" ? "GAMEPAD" : "WAITING"}` })] }), SP_JSX.jsxs("div", { className: "sm-action-audio", children: [SP_JSX.jsx("span", { children: "AUDIO" }), SP_JSX.jsxs(Button, { className: music ? "on" : "", onClick: () => { const enabled = !music; if (audio.setMusic(enabled))
-                                                    setMusic(enabled); }, children: ["\u266B OST ", musicVolume, "% \u00B7 ", music ? "ON" : "OFF"] }), SP_JSX.jsxs(Button, { className: effects ? "on" : "", onClick: () => { const enabled = !effects; setEffects(enabled); audio.effectsEnabled = enabled; if (enabled)
+                                                    setMusic(enabled); }, children: ["\u266B OST ", musicVolume, "% \u00B7 ", music ? "ON" : "OFF"] }), SP_JSX.jsxs(Button, { className: effects ? "on" : "", onClick: () => { const enabled = !effects; setEffects(enabled); audio.setEffects(enabled); if (enabled)
                                                     audio.play("critical"); }, children: ["\u2726 SFX ", effectsVolume, "% \u00B7 ", effects ? "ON" : "OFF"] })] }), SP_JSX.jsxs(Button, { className: `sm-action primary${strikeResult ? " active" : ""}`, preferredFocus: true, disabled: status.paused || status.complete || (status.reward_pending && !finaleArmed), onClick: () => void signalStrike(), children: [SP_JSX.jsx("kbd", { children: "A" }), SP_JSX.jsxs("span", { children: [SP_JSX.jsx("b", { children: finaleArmed ? "LAST STRIKE" : strikeResult || "SIGNAL STRIKE" }), SP_JSX.jsx("small", { children: finaleArmed ? "Break the Ancient Core" : strikeResult ? "Impact registered · mineral progress increased" : "Time it at the vein · next load ×1.5 or ×3" })] })] }), SP_JSX.jsxs(Button, { className: `sm-action${status.convoy_held ? " active" : ""}`, disabled: status.complete, onClick: convoy, children: [SP_JSX.jsx("kbd", { children: "X" }), SP_JSX.jsxs("span", { children: [SP_JSX.jsx("b", { children: status.convoy_held ? `BANK ${status.pending_convoy} LOADED` : "HOLD CONVOY" }), SP_JSX.jsx("small", { children: status.convoy_held ? "Release the group multiplier" : "Stack returning miners at the gates" })] })] }), SP_JSX.jsxs(Button, { className: `sm-action${status.overcharge_remaining > 0 ? " active" : ""}${status.overcharge_cooldown > 0 && status.overcharge_remaining <= 0 ? " disabled" : ""}`, disabled: status.complete || (status.overcharge_cooldown > 0 && status.overcharge_remaining <= 0), onClick: overcharge, children: [SP_JSX.jsx("kbd", { children: "Y" }), SP_JSX.jsxs("span", { children: [SP_JSX.jsx("b", { children: status.overcharge_remaining > 0 ? `OVERCHARGE ${Math.ceil(status.overcharge_remaining)}S` : status.overcharge_cooldown > 0 ? `RECHARGE ${Math.ceil(status.overcharge_cooldown / 60)}M` : "OVERCHARGE" }), SP_JSX.jsx("small", { children: "Thirty seconds at \u00D72.25 power" })] })] }), SP_JSX.jsxs("div", { className: "sm-settings-line", children: [SP_JSX.jsx("span", { children: status.message }), SP_JSX.jsxs("div", { children: [SP_JSX.jsx(Button, { className: "workshop", onClick: () => setShowWorkshop(true), children: "\u2692 WORKSHOP" }), SP_JSX.jsx(Button, { onClick: () => void apply(setPaused(!status.paused)), children: status.paused ? "RESUME" : "PAUSE" }), SP_JSX.jsxs(Button, { onClick: () => void apply(setSetting("led_enabled", !status.led_enabled)), children: ["LED ", status.led_enabled ? "ON" : "OFF"] }), status.hardware_owner === "other" ? SP_JSX.jsx(Button, { onClick: () => void apply(retryLed()), children: "RETRY BAR" }) : null, SP_JSX.jsx(Button, { onClick: () => setResetConfirm(true), children: "RESET" })] })] })] })] })] }), showWorkshop ? SP_JSX.jsx(Workshop, { status: status, onClose: () => setShowWorkshop(false), onBuy: (kind) => void buyUpgrade(kind).then((result) => acceptStatus(result.status)).catch((reason) => setError(String(reason))) }) : null, resetConfirm ? SP_JSX.jsx("div", { className: "sm-reset-confirm", children: SP_JSX.jsxs("div", { className: "sm-reset-card", children: [SP_JSX.jsx("h2", { children: "Start a new expedition?" }), SP_JSX.jsxs("p", { children: ["This permanently erases the current city, crew ranks and all ", status.completed_veins, " cleared veins. The origin story will play again."] }), SP_JSX.jsxs("div", { children: [SP_JSX.jsx(Button, { onClick: () => setResetConfirm(false), children: "Keep this city" }), SP_JSX.jsx(Button, { className: "danger", onClick: () => void resetCampaign().then((next) => { acceptStatus(next); setResetConfirm(false); setShowIntro(true); }).catch((reason) => setError(String(reason))), children: "Erase and restart" })] })] }) }) : null] });
 }
 function QuickPanel() {
@@ -2445,7 +2503,7 @@ function QuickPanel() {
     const [effectsVolume, setEffectsVolume] = SP_REACT.useState(Math.round(sharedAudio.effectsVolume * 100));
     const [resetConfirm, setResetConfirm] = SP_REACT.useState(false);
     const audio = sharedAudio;
-    SP_REACT.useEffect(() => { let alive = true; const refresh = () => void getStatus().then((next) => { if (alive) {
+    SP_REACT.useEffect(() => { audio.startDefaults(); let alive = true; const refresh = () => void getStatus().then((next) => { if (alive) {
         setStatus(next);
         audio.onStatus(next);
         setMusic(audio.musicEnabled);
@@ -2461,7 +2519,7 @@ function QuickPanel() {
     const pageLabel = status.complete ? "FINALE" : status.reward_pending ? "REWARD" : status.cue_active && status.last_cashout && status.cue_kind.startsWith("cashout") ? "SCORE" : QAM_PAGES[pageIndex];
     const progressLabel = veinPercent(status);
     return SP_JSX.jsxs(DFL.PanelSection, { title: "StripMine", children: [SP_JSX.jsx("style", { children: styles }), SP_JSX.jsxs("div", { className: "sm-qam", children: [SP_JSX.jsxs("div", { className: "sm-qam-title", children: [SP_JSX.jsx("img", { className: "sm-qam-logo", src: STRIPMINE_LOGO_URL, alt: "", "aria-hidden": "true" }), SP_JSX.jsx("strong", { children: "STRIPMINE \u00B7 CONTROL ROOM" }), SP_JSX.jsx("i", { children: "\u25CF LIVE" })] }), SP_JSX.jsxs("div", { className: "sm-qam-matrix-panel", children: [SP_JSX.jsxs("header", { children: [SP_JSX.jsx("span", { children: "LIVE STORY MATRIX \u00B7 97K DOTS" }), SP_JSX.jsx("strong", { children: status.cue_active ? status.cue_label : `${status.deposit_short} · ${progressLabel}%` })] }), SP_JSX.jsx("div", { className: "sm-qam-matrix", children: SP_JSX.jsx(DotMatrix, { status: status }) }), SP_JSX.jsxs("div", { className: "sm-qam-pages", "aria-label": `${pageLabel} story page`, children: [QAM_PAGES.map((page, index) => SP_JSX.jsx("i", { className: !status.reward_pending && !status.complete && index === pageIndex ? "active" : "" }, page)), SP_JSX.jsx("span", { children: pageLabel })] }), SP_JSX.jsxs("footer", { children: [SP_JSX.jsxs("span", { children: [west, " WEST"] }), SP_JSX.jsx("span", { children: status.deposit_short }), SP_JSX.jsxs("span", { children: [east, " EAST"] })] })] }), SP_JSX.jsxs("div", { className: "sm-qam-stats", children: [SP_JSX.jsxs("i", { children: [SP_JSX.jsx("span", { children: "AGE" }), SP_JSX.jsxs("b", { children: [status.age + 1, " \u00B7 ", Math.round(status.campaign_progress * 100), "%"] })] }), SP_JSX.jsxs("i", { children: [SP_JSX.jsx("span", { children: "SKYLINE" }), SP_JSX.jsxs("b", { children: [floors, " FLOORS"] })] }), SP_JSX.jsxs("i", { children: [SP_JSX.jsx("span", { children: "CREW" }), SP_JSX.jsxs("b", { children: [status.worker_count, "/4 \u00B7 ", status.rank_name.toUpperCase()] })] })] }), SP_JSX.jsx("div", { className: "sm-qam-tempo", children: TEMPOS.map((name, index) => SP_JSX.jsxs(Button, { className: status.tempo === index + 1 ? "active" : "", onClick: () => update(setTempo(index + 1)), children: [SP_JSX.jsx("b", { children: name }), SP_JSX.jsxs("small", { children: ["\u00D7", index + 1] })] }, name)) }), SP_JSX.jsxs("div", { className: "sm-qam-controls", children: [SP_JSX.jsxs(Button, { className: music ? "on" : "", onClick: () => { const enabled = !music; if (audio.setMusic(enabled))
-                                    setMusic(enabled); }, children: ["\u266B OST ", musicVolume, "% \u00B7 ", music ? "ON" : "OFF"] }), SP_JSX.jsxs(Button, { className: effects ? "on" : "", onClick: () => { const enabled = !effects; audio.effectsEnabled = enabled; setEffects(enabled); if (enabled)
+                                    setMusic(enabled); }, children: ["\u266B OST ", musicVolume, "% \u00B7 ", music ? "ON" : "OFF"] }), SP_JSX.jsxs(Button, { className: effects ? "on" : "", onClick: () => { const enabled = !effects; audio.setEffects(enabled); setEffects(enabled); if (enabled)
                                     audio.play("critical"); }, children: ["\u2726 SFX ", effectsVolume, "% \u00B7 ", effects ? "ON" : "OFF"] }), SP_JSX.jsx(Button, { className: status.paused ? "on" : "", onClick: () => update(setPaused(!status.paused)), children: status.paused ? "▶ RESUME" : "Ⅱ PAUSE" }), SP_JSX.jsxs(Button, { className: status.led_enabled ? "on" : "", onClick: () => update(setSetting("led_enabled", !status.led_enabled)), children: ["\u25B0 LED ", status.led_enabled ? "ON" : "OFF"] })] }), SP_JSX.jsxs("div", { className: "sm-qam-bar-mode", children: [SP_JSX.jsx("span", { children: "PHYSICAL BAR STYLE" }), SP_JSX.jsxs(Button, { "aria-pressed": !status.optical_bar, className: !status.optical_bar ? "active" : "", onClick: () => update(setSetting("optical_bar", false)), children: [SP_JSX.jsx("b", { children: "LUMINOUS" }), SP_JSX.jsx("small", { children: "ALPHA.13 \u00B7 BRIGHT" })] }), SP_JSX.jsxs(Button, { "aria-pressed": status.optical_bar, className: status.optical_bar ? "active" : "", onClick: () => update(setSetting("optical_bar", true)), children: [SP_JSX.jsx("b", { children: "CONTRASTED" }), SP_JSX.jsx("small", { children: "ALPHA.14 \u00B7 DARK GAPS" })] })] }), SP_JSX.jsxs("div", { className: "sm-qam-volume", children: [SP_JSX.jsx(DFL.SliderField, { label: `MUSIC · ${musicVolume}%`, value: musicVolume, min: 0, max: 100, step: 5, showValue: false, onChange: (value) => { setMusicVolume(value); audio.setMusicVolume(value / 100); } }), SP_JSX.jsx(DFL.SliderField, { label: `SFX · ${effectsVolume}%`, value: effectsVolume, min: 0, max: 100, step: 5, showValue: false, onChange: (value) => { setEffectsVolume(value); audio.setEffectsVolume(value / 100); } })] }), SP_JSX.jsxs("div", { className: "sm-qam-footer-actions", children: [SP_JSX.jsx(Button, { className: "sm-qam-reset", onClick: () => setResetConfirm(true), children: "RESET GAME" }), SP_JSX.jsx(Button, { className: "sm-qam-open", onClick: () => { DFL.Navigation.CloseSideMenus(); DFL.Navigation.Navigate("/stripmine/play"); }, children: "OPEN FULL GAME" })] }), resetConfirm ? SP_JSX.jsxs("div", { className: "sm-qam-reset-confirm", children: [SP_JSX.jsx("strong", { children: "ERASE THIS CITY?" }), SP_JSX.jsx("small", { children: "Crew, upgrades, score and all completed veins will be reset. The origin story will play next." }), SP_JSX.jsxs("div", { children: [SP_JSX.jsx(Button, { onClick: () => setResetConfirm(false), children: "CANCEL" }), SP_JSX.jsx(Button, { className: "danger", onClick: () => void resetCampaign().then((next) => { setStatus(next); setResetConfirm(false); DFL.Navigation.CloseSideMenus(); DFL.Navigation.Navigate("/stripmine/play"); }).catch(() => undefined), children: "RESET + INTRO" })] })] }) : null] })] });
 }
 var index = definePlugin(() => {

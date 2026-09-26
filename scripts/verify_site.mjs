@@ -27,9 +27,13 @@ try {
   assert.ok(brandMetrics.height >= 54, `Header wordmark is too short: ${brandMetrics.height}px`);
   assert.ok(brandMetrics.fontSize >= 54, `Header wordmark is too small: ${brandMetrics.fontSize}px`);
   await page.frameLocator("#game-frame").locator("body").waitFor();
+  await page.frameLocator("#game-frame").getByRole("button", { name: /OST 80% · ON/ }).waitFor();
+  await page.frameLocator("#game-frame").getByRole("button", { name: /SFX 65% · ON/ }).waitFor();
 
   await page.locator('[data-view="decky"]').click();
   await page.frameLocator("#decky-frame").locator("body").waitFor();
+  await page.frameLocator("#decky-frame").getByRole("button", { name: /OST 80% · ON/ }).waitFor();
+  await page.frameLocator("#decky-frame").getByRole("button", { name: /SFX 65% · ON/ }).waitFor();
   await page.locator(".decky-view.is-active").waitFor();
 
   await page.locator('[data-view="physical"]').click();
