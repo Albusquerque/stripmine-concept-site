@@ -7,6 +7,7 @@ import path from "node:path";
 
 const BASE_URL = process.env.STRIPMINE_CAPTURE_URL || "http://127.0.0.1:8772/";
 const INTERVAL_MS = 180;
+const livingOnly = process.argv.includes("--living-only");
 const outputDir = path.resolve(import.meta.dirname, "..", "assets", "readme-gifs");
 const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "stripmine-readme-capture-"));
 const browser = await chromium.launch({ headless: true });
@@ -44,13 +45,27 @@ async function newPage() {
 }
 
 async function captureGame() {
-  const page = await newPage();
-  await page.locator('[data-view="game"]').click();
-  await page.frameLocator("#game-frame").locator("body").waitFor();
-  await page.waitForTimeout(900);
+  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+  await page.goto(new URL("demo/plugin.html?v=32", BASE_URL).href, { waitUntil: "networkidle" });
+  await page.locator(".sm-world-stage").waitFor();
+  await page.waitForTimeout(350);
   const folder = path.join(scratch, "full-game");
-  await captureFrames(page.locator(".tv-bezel"), 4300, folder);
-  encode("full-game", folder, 900, 112);
+  await fs.mkdir(folder, { recursive: true });
+  const durationMs = 5600;
+  const count = Math.ceil(durationMs / INTERVAL_MS);
+  const started = Date.now();
+  let strikeTriggered = false;
+  for (let index = 0; index < count; index += 1) {
+    const elapsed = index * INTERVAL_MS;
+    const remaining = started + elapsed - Date.now();
+    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+    if (!strikeTriggered && elapsed >= 1620) {
+      strikeTriggered = true;
+      await page.getByRole("button", { name: /SIGNAL STRIKE/ }).click();
+    }
+    await page.locator("#root").screenshot({ path: path.join(folder, `${String(index).padStart(4, "0")}.png`) });
+  }
+  encode("full-game", folder, 1000, 128);
   await page.close();
 }
 
@@ -94,9 +109,11 @@ async function captureProfiles() {
 try {
   await fs.mkdir(outputDir, { recursive: true });
   await captureGame();
-  await captureDecky();
-  await capturePhysical();
-  await captureProfiles();
+  if (!livingOnly) {
+    await captureDecky();
+    await capturePhysical();
+    await captureProfiles();
+  }
 } finally {
   await browser.close();
   await fs.rm(scratch, { recursive: true, force: true });

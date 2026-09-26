@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "capture:readme": "node scripts/capture_readme_gifs.mjs",
+    "capture:living": "node scripts/capture_readme_gifs.mjs --living-only",
     "test": "node scripts/verify_site.mjs"
   },
   "devDependencies": {
