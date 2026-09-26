@@ -753,9 +753,10 @@ function DotMatrix({ status }) {
     return SP_JSX.jsx("canvas", { ref: canvasRef, className: "sm-matrix", width: MATRIX_COLS * OUTPUT_SCALE, height: MATRIX_ROWS * OUTPUT_SCALE });
 }
 
-const STRIPMINE_LOGO_URL = window.location.protocol === "http:" && window.location.port !== "1337"
-    ? `${window.location.origin}/assets/stripmine-logo.png`
-    : "http://127.0.0.1:1337/plugins/StripMine/assets/stripmine-logo.png";
+const isDeckyAssetServer = window.location.protocol === "http:" && window.location.port === "1337";
+const STRIPMINE_LOGO_URL = isDeckyAssetServer
+    ? "http://127.0.0.1:1337/plugins/StripMine/assets/stripmine-logo.png"
+    : new URL("../assets/stripmine-logo.png", window.location.href).href;
 
 function Button$1(props) { return SP_JSX.jsx(DFL.Button, { ...props }); }
 const TEMPOS$1 = [
