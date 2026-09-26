@@ -322,7 +322,7 @@ window.__DECKY_SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED_deckyLoaderAPIIn
 
 window.__STRIPMINE_PREVIEW_LOGO__ = new URL("../assets/stripmine-logo.png", window.location.href).href;
 
-const pluginModule = await import("../dist/index.js?v=43");
+const pluginModule = await import("../dist/index.js?v=44");
 const plugin = pluginModule.default();
 if (!registeredGame) throw new Error("StripMine route was not registered");
 previewRoot = createRoot(document.getElementById("root"));
